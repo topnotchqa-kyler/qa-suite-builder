@@ -85,10 +85,10 @@ async def generate_endpoint(request: GenerateRequest):
             raise HTTPException(status_code=422, detail="No pages were crawled. Check the URL and try again.")
 
         # Step 2: Generate test suite via Anthropic API
-        test_suite = generate_test_suite(crawl_data)
+        test_suite = await asyncio.to_thread(generate_test_suite, crawl_data)
 
         # Step 3: Build .xlsx workbook
-        xlsx_bytes = build_workbook(test_suite)
+        xlsx_bytes = await asyncio.to_thread(build_workbook, test_suite)
 
         # Step 4: Stream back as file download
         site_name = test_suite.get("site_name", "qa_suite").lower().replace(" ", "_")
@@ -118,8 +118,8 @@ async def generate_from_crawl_endpoint(crawl_data: dict):
     Useful for re-running generation without re-crawling.
     """
     try:
-        test_suite = generate_test_suite(crawl_data)
-        xlsx_bytes = build_workbook(test_suite)
+        test_suite = await asyncio.to_thread(generate_test_suite, crawl_data)
+        xlsx_bytes = await asyncio.to_thread(build_workbook, test_suite)
 
         site_name = test_suite.get("site_name", "qa_suite").lower().replace(" ", "_")
         filename = f"{site_name}_qa_suite.xlsx"
