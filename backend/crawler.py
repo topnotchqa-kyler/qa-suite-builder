@@ -97,7 +97,7 @@ async def _crawl_page(context: BrowserContext, url: str, base_domain: str, depth
     page.on("request", on_request)
 
     try:
-        await page.goto(url, wait_until="networkidle", timeout=12000)
+        await page.goto(url, wait_until="load", timeout=15000)
         await page.wait_for_timeout(1000)  # Let any JS settle
 
         title = await page.title()
