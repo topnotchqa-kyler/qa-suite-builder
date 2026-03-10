@@ -11,8 +11,8 @@ from typing import Optional
 from playwright.async_api import async_playwright, Page, BrowserContext
 
 
-MAX_PAGES = 30  # Safety cap for MVP
-MAX_DEPTH = 3
+MAX_PAGES = 15  # Keep pipeline under Railway's 300s request timeout
+MAX_DEPTH = 2
 
 
 async def crawl_site(base_url: str, username: Optional[str] = None, password: Optional[str] = None) -> dict:
@@ -97,7 +97,7 @@ async def _crawl_page(context: BrowserContext, url: str, base_domain: str, depth
     page.on("request", on_request)
 
     try:
-        await page.goto(url, wait_until="networkidle", timeout=20000)
+        await page.goto(url, wait_until="networkidle", timeout=12000)
         await page.wait_for_timeout(1000)  # Let any JS settle
 
         title = await page.title()
