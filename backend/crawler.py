@@ -28,7 +28,19 @@ async def crawl_site(base_url: str, username: Optional[str] = None, password: Op
     queue = [(base_url, 0)]  # (url, depth)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",  # Use /tmp instead of /dev/shm (critical in Docker)
+                "--disable-gpu",
+                "--disable-extensions",
+                "--disable-background-networking",
+                "--disable-sync",
+                "--metrics-recording-only",
+                "--mute-audio",
+            ],
+        )
         context = await browser.new_context(
             viewport={"width": 1280, "height": 800},
             user_agent="Mozilla/5.0 (QA-Crawler/1.0)"
