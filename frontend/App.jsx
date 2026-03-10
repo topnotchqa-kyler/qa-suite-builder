@@ -42,12 +42,13 @@ export default function App() {
       const ctrl = new AbortController();
       abortRef.current = ctrl;
 
+      const fullUrl = url.trim().match(/^https?:\/\//) ? url.trim() : `https://${url.trim()}`;
       const res = await fetch(`${API_BASE}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: ctrl.signal,
         body: JSON.stringify({
-          url: url.trim(),
+          url: fullUrl,
           username: username || null,
           password: password || null,
         }),
