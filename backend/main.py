@@ -4,14 +4,21 @@ Thin route handlers; all business logic lives in service modules.
 """
 
 import asyncio
-import traceback
+import ipaddress
+import logging
+import re
+import socket
 from typing import Optional
+from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 from dotenv import load_dotenv
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import io
 
 load_dotenv()
@@ -21,7 +28,12 @@ from generation import generate_test_suite
 from xlsx_builder import build_workbook
 
 
+logger = logging.getLogger(__name__)
+
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(title="QA Suite Builder", version="1.0.0")
+app.state.limiter = limiter
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,6 +42,14 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Pages-Crawled", "X-Sections-Generated", "Content-Disposition"],
 )
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Rate limit exceeded. Please try again later."},
+    )
 
 
 class GenerateRequest(BaseModel):
@@ -44,41 +64,92 @@ class CrawlOnlyRequest(BaseModel):
     password: Optional[str] = None
 
 
+def _validate_url(url: str) -> None:
+    """Raise HTTPException if URL targets private/internal infrastructure (SSRF protection)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="URL must use http or https.")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(status_code=400, detail="Invalid URL: missing hostname.")
+
+    # Block known internal/metadata hostnames
+    blocked_hosts = {
+        "localhost",
+        "metadata",
+        "metadata.google.internal",
+        "169.254.169.254",  # AWS/GCP/Azure metadata endpoint
+    }
+    if hostname.lower() in blocked_hosts:
+        raise HTTPException(status_code=400, detail="URL not allowed.")
+
+    # If hostname is already an IP, validate it directly
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            raise HTTPException(status_code=400, detail="URL not allowed.")
+        return
+    except ValueError:
+        pass  # Not an IP literal — resolve below
+
+    # Resolve hostname and validate the resulting IP
+    try:
+        resolved = socket.gethostbyname(hostname)
+        ip = ipaddress.ip_address(resolved)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            raise HTTPException(status_code=400, detail="URL not allowed.")
+    except socket.gaierror:
+        raise HTTPException(status_code=400, detail="Could not resolve URL hostname.")
+
+
+def _sanitize_filename(name: str) -> str:
+    """Strip characters unsafe for Content-Disposition filenames."""
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "", name)
+    return safe[:50] or "qa_suite"
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
 
 @app.post("/api/crawl")
-async def crawl_endpoint(request: CrawlOnlyRequest):
+@limiter.limit("20/hour")
+async def crawl_endpoint(request: Request, body: CrawlOnlyRequest):
     """
     Crawl only — returns raw crawl data as JSON.
     Useful for debugging and inspecting what the crawler found.
     """
+    _validate_url(body.url)
     try:
         crawl_data = await crawl_site(
-            base_url=str(request.url),
-            username=request.username,
-            password=request.password,
+            base_url=body.url,
+            username=body.username,
+            password=body.password,
         )
         return JSONResponse(content=crawl_data)
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Crawl error for URL: %s", body.url)
+        raise HTTPException(status_code=500, detail="An error occurred while crawling. Check the URL and try again.")
 
 
 @app.post("/api/generate")
-async def generate_endpoint(request: GenerateRequest):
+@limiter.limit("10/hour")
+async def generate_endpoint(request: Request, body: GenerateRequest):
     """
     Full pipeline: crawl → generate test cases → return .xlsx file.
     Streams the binary .xlsx back to the client.
     """
+    _validate_url(body.url)
     try:
         # Step 1: Crawl
         crawl_data = await crawl_site(
-            base_url=str(request.url),
-            username=request.username,
-            password=request.password,
+            base_url=body.url,
+            username=body.username,
+            password=body.password,
         )
 
         if not crawl_data.get("pages"):
@@ -91,7 +162,9 @@ async def generate_endpoint(request: GenerateRequest):
         xlsx_bytes = await asyncio.to_thread(build_workbook, test_suite)
 
         # Step 4: Stream back as file download
-        site_name = test_suite.get("site_name", "qa_suite").lower().replace(" ", "_")
+        site_name = _sanitize_filename(
+            test_suite.get("site_name", "qa_suite").lower().replace(" ", "_")
+        )
         filename = f"{site_name}_qa_suite.xlsx"
 
         return StreamingResponse(
@@ -106,13 +179,14 @@ async def generate_endpoint(request: GenerateRequest):
 
     except HTTPException:
         raise
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Pipeline error: {str(e)}")
+    except Exception:
+        logger.exception("Pipeline error for URL: %s", body.url)
+        raise HTTPException(status_code=500, detail="An error occurred generating the test suite. Please try again.")
 
 
 @app.post("/api/generate-from-crawl")
-async def generate_from_crawl_endpoint(crawl_data: dict):
+@limiter.limit("10/hour")
+async def generate_from_crawl_endpoint(request: Request, crawl_data: dict):
     """
     Generate .xlsx from pre-existing crawl data (skip crawl step).
     Useful for re-running generation without re-crawling.
@@ -121,7 +195,9 @@ async def generate_from_crawl_endpoint(crawl_data: dict):
         test_suite = await asyncio.to_thread(generate_test_suite, crawl_data)
         xlsx_bytes = await asyncio.to_thread(build_workbook, test_suite)
 
-        site_name = test_suite.get("site_name", "qa_suite").lower().replace(" ", "_")
+        site_name = _sanitize_filename(
+            test_suite.get("site_name", "qa_suite").lower().replace(" ", "_")
+        )
         filename = f"{site_name}_qa_suite.xlsx"
 
         return StreamingResponse(
@@ -129,6 +205,6 @@ async def generate_from_crawl_endpoint(crawl_data: dict):
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'}
         )
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Generate-from-crawl error")
+        raise HTTPException(status_code=500, detail="An error occurred generating the test suite. Please try again.")

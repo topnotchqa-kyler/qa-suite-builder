@@ -22,6 +22,7 @@ export default function App() {
   const [meta, setMeta]         = useState(null);   // { pages, sections, filename }
   const [downloadUrl, setDownloadUrl] = useState(null);
   const abortRef = useRef(null);
+  const progressCardRef = useRef(null);
 
   const isRunning = phase === "running";
 
@@ -34,6 +35,9 @@ export default function App() {
     setError("");
     setMeta(null);
     setDownloadUrl(null);
+
+    // Move focus to progress card for screen readers
+    setTimeout(() => progressCardRef.current?.focus(), 50);
 
     // Simulate incremental progress steps while the real request runs
     const stepTimer = startStepTimer();
@@ -116,21 +120,46 @@ export default function App() {
       <div style={styles.bg} />
       <div style={styles.grain} />
 
+      <a
+        href="https://github.com/topnotchqa-kyler/qa-suite-builder"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={styles.githubLink}
+        aria-label="View source on GitHub"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+          <path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.014-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836a9.59 9.59 0 0 1 2.504.337c1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z" />
+        </svg>
+        GitHub
+      </a>
+
       <main style={styles.main}>
         {/* ── Logo / heading ── */}
         <header style={styles.header}>
           <div style={styles.logo}>
-            <span style={styles.logoIcon}>⬡</span>
-            <span style={styles.logoText}>QA Suite Builder</span>
+            <svg width="42" height="42" viewBox="0 0 32 32" aria-hidden="true" style={styles.logoSvg}>
+              <defs>
+                <linearGradient id="lg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stopColor="#9333EA" />
+                  <stop offset="100%" stopColor="#6D28D9" />
+                </linearGradient>
+              </defs>
+              <rect width="32" height="32" rx="8" fill="url(#lg)" />
+              <path d="M8 16.5l5 5 11-11" stroke="#fff" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            </svg>
+            <h1 style={styles.logoText}>
+              <span style={{ color: "#F0E6FF" }}>Suite</span>
+              <span style={{ color: "#C084FC" }}>Gen</span>
+            </h1>
           </div>
           <p style={styles.tagline}>
-            Crawl any URL. Generate a structured, downloadable test suite — grounded in the actual UI.
+            AI-assisted QA test suite generation for any website — crawl the UI, get structured, downloadable test cases in minutes.
           </p>
         </header>
 
         {/* ── Form card ── */}
         <div style={styles.card}>
-          <form onSubmit={handleSubmit} style={styles.form}>
+          <form onSubmit={handleSubmit} style={styles.form} aria-busy={isRunning}>
             <div style={styles.urlRow}>
               <div style={styles.urlInputWrap}>
                 <span style={styles.urlPrefix}>https://</span>
@@ -143,6 +172,7 @@ export default function App() {
                   disabled={isRunning}
                   autoFocus
                   required
+                  aria-label="Website URL to crawl"
                 />
               </div>
 
@@ -164,6 +194,7 @@ export default function App() {
               onClick={() => setShowAuth(v => !v)}
               style={styles.authToggle}
               disabled={isRunning}
+              aria-expanded={showAuth}
             >
               {showAuth ? "▾" : "▸"} Auth credentials (optional)
             </button>
@@ -178,6 +209,7 @@ export default function App() {
                   style={styles.authInput}
                   disabled={isRunning}
                   autoComplete="username"
+                  aria-label="HTTP basic auth username"
                 />
                 <input
                   type="password"
@@ -187,6 +219,7 @@ export default function App() {
                   style={styles.authInput}
                   disabled={isRunning}
                   autoComplete="current-password"
+                  aria-label="HTTP basic auth password"
                 />
               </div>
             )}
@@ -195,15 +228,22 @@ export default function App() {
 
         {/* ── Progress ── */}
         {(isRunning || phase === "done") && (
-          <div style={styles.progressCard}>
-            <div style={styles.steps}>
+          <div
+            ref={progressCardRef}
+            style={styles.progressCard}
+            tabIndex={-1}
+            role="status"
+            aria-live="polite"
+            aria-label="Generation progress"
+          >
+            <ol style={{ ...styles.steps, listStyle: "none", padding: 0, margin: 0 }}>
               {STEPS.map((step, i) => {
                 const isDone    = i < stepIdx || phase === "done";
                 const isActive  = i === stepIdx && isRunning;
                 const isPending = i > stepIdx;
 
                 return (
-                  <div key={step.id} style={styles.stepRow}>
+                  <li key={step.id} style={styles.stepRow}>
                     <div style={{
                       ...styles.stepDot,
                       ...(isDone  ? styles.stepDotDone    : {}),
@@ -215,15 +255,15 @@ export default function App() {
                     <span style={{
                       ...styles.stepLabel,
                       ...(isActive  ? { color: "#E2C4FF", fontWeight: 600 } : {}),
-                      ...(isPending ? { color: "#444" } : {}),
+                      ...(isPending ? { color: "#777" } : {}),
                     }}>
                       {step.label}
                       {isActive && <Spinner />}
                     </span>
-                  </div>
+                  </li>
                 );
               })}
-            </div>
+            </ol>
 
             {isRunning && (
               <button onClick={handleCancel} style={styles.cancelBtn}>
@@ -235,7 +275,7 @@ export default function App() {
 
         {/* ── Error ── */}
         {phase === "error" && (
-          <div style={styles.errorCard}>
+          <div style={styles.errorCard} role="alert" aria-live="assertive">
             <span style={styles.errorIcon}>⚠</span>
             <div>
               <strong style={{ color: "#FF6B6B" }}>Something went wrong</strong>
@@ -278,20 +318,32 @@ export default function App() {
             ].map(item => (
               <div key={item.title} style={styles.howCard}>
                 <div style={styles.howIcon}>{item.icon}</div>
-                <h3 style={styles.howTitle}>{item.title}</h3>
+                <h2 style={styles.howTitle}>{item.title}</h2>
                 <p style={styles.howDesc}>{item.desc}</p>
               </div>
             ))}
           </div>
         )}
       </main>
+
+      {/* ── Footer ── */}
+      <footer style={styles.footer}>
+        <a
+          href="https://topnotchqa.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={styles.footerLink}
+        >
+          Need a human QA team? TopNotch QA offers professional testing services →
+        </a>
+      </footer>
     </div>
   );
 }
 
 function Stat({ label, value }) {
   return (
-    <div style={styles.stat}>
+    <div style={styles.stat} aria-label={`${label}: ${value}`}>
       <span style={styles.statValue}>{value}</span>
       <span style={styles.statLabel}>{label}</span>
     </div>
@@ -299,7 +351,7 @@ function Stat({ label, value }) {
 }
 
 function Spinner() {
-  return <span style={styles.spinner} />;
+  return <span style={styles.spinner} aria-hidden="true" />;
 }
 
 // ── Styles ─────────────────────────────────────────────────────────────────
@@ -326,6 +378,23 @@ const styles = {
     pointerEvents: "none",
     zIndex: 0,
   },
+  githubLink: {
+    position: "fixed",
+    top: 16,
+    right: 20,
+    zIndex: 10,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    color: "#999",
+    fontSize: 13,
+    textDecoration: "none",
+    padding: "6px 12px",
+    borderRadius: 8,
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    transition: "color 0.15s, background 0.15s",
+  },
   main: {
     position: "relative",
     zIndex: 1,
@@ -340,23 +409,23 @@ const styles = {
   logo: {
     display: "inline-flex",
     alignItems: "center",
-    gap: 10,
+    gap: 12,
     marginBottom: 16,
   },
-  logoIcon: {
-    fontSize: 28,
-    color: "#C084FC",
-    filter: "drop-shadow(0 0 8px rgba(192,132,252,0.6))",
+  logoSvg: {
+    filter: "drop-shadow(0 0 10px rgba(124,58,237,0.55))",
+    flexShrink: 0,
   },
   logoText: {
-    fontSize: 22,
+    fontSize: 30,
     fontWeight: 700,
-    letterSpacing: "-0.5px",
-    color: "#F0E6FF",
+    letterSpacing: "-0.8px",
+    margin: 0,
+    lineHeight: 1,
   },
   tagline: {
     fontSize: 15,
-    color: "#888",
+    color: "#A0A0B4",
     maxWidth: 480,
     margin: "0 auto",
     lineHeight: 1.6,
@@ -384,7 +453,7 @@ const styles = {
   },
   urlPrefix: {
     padding: "0 10px",
-    color: "#666",
+    color: "#8A8A9A",
     fontSize: 13,
     whiteSpace: "nowrap",
     borderRight: "1px solid rgba(255,255,255,0.08)",
@@ -418,7 +487,7 @@ const styles = {
   authToggle: {
     background: "none",
     border: "none",
-    color: "#666",
+    color: "#999",
     fontSize: 12,
     cursor: "pointer",
     textAlign: "left",
@@ -543,7 +612,7 @@ const styles = {
   doneStats: { display: "flex", gap: 32 },
   stat: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2 },
   statValue: { fontSize: 24, fontWeight: 700, color: "#E2C4FF" },
-  statLabel: { fontSize: 11, color: "#666", textTransform: "uppercase", letterSpacing: "0.05em" },
+  statLabel: { fontSize: 11, color: "#999", textTransform: "uppercase", letterSpacing: "0.05em" },
   downloadBtn: {
     display: "inline-block",
     background: "linear-gradient(135deg, #7C3AED, #5B21B6)",
@@ -558,7 +627,7 @@ const styles = {
   newBtn: {
     background: "none",
     border: "none",
-    color: "#666",
+    color: "#999",
     fontSize: 12,
     cursor: "pointer",
     fontFamily: "inherit",
@@ -579,7 +648,21 @@ const styles = {
   },
   howIcon: { fontSize: 22, marginBottom: 10 },
   howTitle: { fontSize: 13, fontWeight: 600, color: "#D0C0F0", margin: "0 0 6px" },
-  howDesc: { fontSize: 12, color: "#666", lineHeight: 1.6, margin: 0 },
+  howDesc: { fontSize: 12, color: "#999", lineHeight: 1.6, margin: 0 },
+
+  footer: {
+    position: "relative",
+    zIndex: 1,
+    textAlign: "center",
+    padding: "20px 24px 32px",
+  },
+  footerLink: {
+    fontSize: 12,
+    color: "#666",
+    textDecoration: "none",
+    borderBottom: "1px solid transparent",
+    transition: "color 0.15s, border-color 0.15s",
+  },
 };
 
 // Inject keyframes
@@ -589,5 +672,8 @@ styleEl.textContent = `
   * { box-sizing: border-box; }
   body { margin: 0; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+  }
 `;
 document.head.appendChild(styleEl);
