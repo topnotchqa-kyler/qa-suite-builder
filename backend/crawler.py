@@ -6,14 +6,17 @@ and network requests from a given base URL.
 
 import asyncio
 import json
+import os
 import re
 from urllib.parse import urljoin, urlparse
 from typing import Optional
 from playwright.async_api import async_playwright, Page, BrowserContext
 
 
-MAX_PAGES = 15  # Keep pipeline under Railway's 300s request timeout
-MAX_DEPTH = 2
+# Override via env vars for local development (no Railway 300s timeout applies).
+# Production defaults are conservative to stay well under Railway's limit.
+MAX_PAGES = int(os.getenv("MAX_PAGES", "15"))
+MAX_DEPTH = int(os.getenv("MAX_DEPTH", "2"))
 
 # In-page interaction limits (tabs / accordions)
 MAX_TAB_GROUPS = 2       # Max distinct tab groups to process per page
