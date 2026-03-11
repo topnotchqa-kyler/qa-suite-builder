@@ -241,7 +241,13 @@ Rules:
 
 def _build_page_context(page: dict) -> str:
     """Build a concise context string for a single page."""
-    lines = [
+    lines = []
+    if page.get("template_key"):
+        lines.append(
+            f"Template representative for: {page['template_key']}* pages"
+            f" — write tests that apply to all pages matching this URL pattern"
+        )
+    lines += [
         f"URL: {page['url']}",
         f"Title: {page.get('title', 'Unknown')}",
     ]
