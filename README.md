@@ -6,9 +6,64 @@ Generate a comprehensive, structured QA test suite for any website — powered b
 
 ## How it works
 
-1. **Crawl** — Playwright maps every reachable page: DOM structure, form fields, button labels, nav items, API calls
-2. **Generate** — Claude generates test cases grounded in the actual UI (real field names, real interactions)
-3. **Download** — Formatted `.xlsx` workbook with Dashboard, per-section sheets, status dropdowns, priority tags, color coding
+1. **Discover** — The crawler fetches the site's `sitemap.xml` to get a complete URL inventory upfront. If no sitemap is found it falls back to BFS link-following.
+2. **Select** — URLs are grouped into unique pages and template families (blog posts, location pages, career listings, etc.). Only the structurally distinct pages and a small number of representatives per template are scheduled for crawling, keeping the budget focused on what matters.
+3. **Crawl** — Playwright loads each selected page and extracts DOM structure, headings, form fields, button labels, navigation, API calls, and hidden content revealed by tabs and accordions.
+4. **Generate** — Claude produces test cases grounded in the actual UI: real field names, real interactions, template-aware framing for repeated page types.
+5. **Download** — A formatted `.xlsx` workbook with a Dashboard summary sheet and one sheet per page section.
+
+---
+
+## URL Discovery Strategy
+
+### Sitemap mode (primary)
+
+When a site has `sitemap.xml` the crawler reads it before opening any page. Sitemap index files (e.g. WordPress sites with separate `post-sitemap.xml`, `location-sitemap.xml`, etc.) are handled automatically — all child sitemaps are fetched in parallel and their filenames are used as template hints.
+
+The result is a complete URL inventory available before the first page loads:
+
+```json
+{
+  "site_architecture": {
+    "total_urls_in_sitemap": 908,
+    "unique_pages": 29,
+    "template_families": {
+      "/blog/": 80,
+      "/locations/": 129,
+      "/career-listings/": 479,
+      "/menu-category/": 9
+    },
+    "pages_selected_for_crawl": 20,
+    "discovery_method": "sitemap"
+  }
+}
+```
+
+`site_architecture` is included in all API responses so the full inventory is visible without crawling every page.
+
+### BFS mode (fallback)
+
+Sites without a sitemap are crawled via breadth-first link following. Navigation links are always prioritised so top-level sections are reached before content pages. BFS stops at `MAX_DEPTH` link hops from the base URL.
+
+### Template deduplication
+
+Both modes apply the same deduplication logic: URL paths with a slug or numeric terminal segment are identified as template instances (e.g. `/blog/spring-at-ziggis/` → template key `/blog/`). At most `MAX_TEMPLATE_REPS` representatives are crawled per family. The AI is told the page is a template representative so it writes pattern-level tests rather than tests specific to one instance.
+
+---
+
+## Local vs. Production
+
+The hosted version at suitegen.dev runs on Railway, which enforces a **300-second HTTP request timeout**. The production crawler defaults are sized to complete comfortably within that window.
+
+When running locally there is no timeout constraint, so limits can be raised freely via environment variables.
+
+| Variable | Production default | Recommended local value | Effect |
+|----------|--------------------|-------------------------|--------|
+| `MAX_PAGES` | `20` | `50` | Max pages crawled per run |
+| `MAX_DEPTH` | `2` | `3` | Max BFS link depth from base URL (sitemap mode ignores this) |
+| `MAX_TEMPLATE_REPS` | `1` | `3` | Representatives crawled per detected template family |
+
+Set these in `backend/.env` for local development — see `.env.example` for the exact syntax. They are never committed and are not required in Railway (defaults apply).
 
 ---
 
@@ -55,12 +110,11 @@ pip install -r requirements.txt
 # Install Playwright browsers
 playwright install chromium
 
-# Create .env from example
+# Create .env from example and add your API key + optional higher limits
 cp .env.example .env
-# → Edit .env and add your ANTHROPIC_API_KEY
 
 # Start the server
-uvicorn main:app --reload --port 8000
+python3 -m uvicorn main:app --reload --port 8000
 ```
 
 ### Frontend
@@ -71,7 +125,7 @@ cd frontend
 # Install Node dependencies
 npm install
 
-# Create .env.local from example
+# Create .env.local and point it at the local backend
 cp .env.example .env.local
 # → Set VITE_API_URL=http://localhost:8000
 
@@ -91,7 +145,7 @@ qa-suite-builder/
 ├── vercel.json              # Vercel build config
 ├── backend/
 │   ├── main.py              # FastAPI routes (thin handlers)
-│   ├── crawler.py           # Playwright crawl service
+│   ├── crawler.py           # Playwright crawl + sitemap discovery
 │   ├── generation.py        # Anthropic AI generation service
 │   ├── xlsx_builder.py      # openpyxl workbook builder
 │   ├── Dockerfile           # Backend-only Dockerfile
@@ -113,11 +167,12 @@ qa-suite-builder/
 | Method | Path | Rate limit | Description |
 |--------|------|------------|-------------|
 | `GET`  | `/health` | — | Health check |
-| `POST` | `/api/crawl` | 20/hr per IP | Crawl only — returns raw JSON |
+| `POST` | `/api/crawl` | 20/hr per IP | Crawl only — returns raw JSON including `site_architecture` |
 | `POST` | `/api/generate` | 10/hr per IP | Full pipeline → `.xlsx` download |
+| `POST` | `/api/generate?format=json` | 10/hr per IP | Full pipeline → JSON (skips xlsx build, fast for iteration) |
 | `POST` | `/api/generate-from-crawl` | 10/hr per IP | Generate from existing crawl data |
 
-### Request body (`/api/generate`)
+### Request body
 
 ```json
 {
@@ -127,7 +182,7 @@ qa-suite-builder/
 }
 ```
 
-`username` and `password` are optional HTTP Basic Auth credentials for password-protected sites.
+`username` and `password` are optional credentials for password-protected sites. The crawler first attempts HTTP Basic Auth, then detects and submits HTML login forms automatically.
 
 ---
 
@@ -154,18 +209,7 @@ The `.xlsx` workbook contains:
 
 ---
 
-## Configuration
-
-Crawler limits (editable in `crawler.py`):
-
-| Constant | Default | Description |
-|----------|---------|-------------|
-| `MAX_PAGES` | `15` | Max pages crawled per run |
-| `MAX_DEPTH` | `2` | Max link depth from base URL |
-
----
-
-## Coding conventions
+## Coding Conventions
 
 - Functional React components with hooks
 - FastAPI route handlers are thin — business logic lives in service modules
