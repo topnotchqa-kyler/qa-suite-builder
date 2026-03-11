@@ -153,7 +153,7 @@ export default function App() {
             </h1>
           </div>
           <p style={styles.tagline}>
-            Crawl any URL. Generate a structured, downloadable test suite — grounded in the actual UI.
+            AI-assisted QA test suite generation for any website — crawl the UI, get structured, downloadable test cases in minutes.
           </p>
         </header>
 
