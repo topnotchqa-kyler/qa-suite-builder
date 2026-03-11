@@ -22,6 +22,7 @@ export default function App() {
   const [meta, setMeta]         = useState(null);   // { pages, sections, filename }
   const [downloadUrl, setDownloadUrl] = useState(null);
   const abortRef = useRef(null);
+  const progressCardRef = useRef(null);
 
   const isRunning = phase === "running";
 
@@ -34,6 +35,9 @@ export default function App() {
     setError("");
     setMeta(null);
     setDownloadUrl(null);
+
+    // Move focus to progress card for screen readers
+    setTimeout(() => progressCardRef.current?.focus(), 50);
 
     // Simulate incremental progress steps while the real request runs
     const stepTimer = startStepTimer();
@@ -120,8 +124,8 @@ export default function App() {
         {/* ── Logo / heading ── */}
         <header style={styles.header}>
           <div style={styles.logo}>
-            <span style={styles.logoIcon}>⬡</span>
-            <span style={styles.logoText}>QA Suite Builder</span>
+            <span style={styles.logoIcon} aria-hidden="true">⬡</span>
+            <h1 style={styles.logoText}>QA Suite Builder</h1>
           </div>
           <p style={styles.tagline}>
             Crawl any URL. Generate a structured, downloadable test suite — grounded in the actual UI.
@@ -130,7 +134,7 @@ export default function App() {
 
         {/* ── Form card ── */}
         <div style={styles.card}>
-          <form onSubmit={handleSubmit} style={styles.form}>
+          <form onSubmit={handleSubmit} style={styles.form} aria-busy={isRunning}>
             <div style={styles.urlRow}>
               <div style={styles.urlInputWrap}>
                 <span style={styles.urlPrefix}>https://</span>
@@ -143,6 +147,7 @@ export default function App() {
                   disabled={isRunning}
                   autoFocus
                   required
+                  aria-label="Website URL to crawl"
                 />
               </div>
 
@@ -164,6 +169,7 @@ export default function App() {
               onClick={() => setShowAuth(v => !v)}
               style={styles.authToggle}
               disabled={isRunning}
+              aria-expanded={showAuth}
             >
               {showAuth ? "▾" : "▸"} Auth credentials (optional)
             </button>
@@ -178,6 +184,7 @@ export default function App() {
                   style={styles.authInput}
                   disabled={isRunning}
                   autoComplete="username"
+                  aria-label="HTTP basic auth username"
                 />
                 <input
                   type="password"
@@ -187,6 +194,7 @@ export default function App() {
                   style={styles.authInput}
                   disabled={isRunning}
                   autoComplete="current-password"
+                  aria-label="HTTP basic auth password"
                 />
               </div>
             )}
@@ -195,15 +203,22 @@ export default function App() {
 
         {/* ── Progress ── */}
         {(isRunning || phase === "done") && (
-          <div style={styles.progressCard}>
-            <div style={styles.steps}>
+          <div
+            ref={progressCardRef}
+            style={styles.progressCard}
+            tabIndex={-1}
+            role="status"
+            aria-live="polite"
+            aria-label="Generation progress"
+          >
+            <ol style={{ ...styles.steps, listStyle: "none", padding: 0, margin: 0 }}>
               {STEPS.map((step, i) => {
                 const isDone    = i < stepIdx || phase === "done";
                 const isActive  = i === stepIdx && isRunning;
                 const isPending = i > stepIdx;
 
                 return (
-                  <div key={step.id} style={styles.stepRow}>
+                  <li key={step.id} style={styles.stepRow}>
                     <div style={{
                       ...styles.stepDot,
                       ...(isDone  ? styles.stepDotDone    : {}),
@@ -215,15 +230,15 @@ export default function App() {
                     <span style={{
                       ...styles.stepLabel,
                       ...(isActive  ? { color: "#E2C4FF", fontWeight: 600 } : {}),
-                      ...(isPending ? { color: "#444" } : {}),
+                      ...(isPending ? { color: "#777" } : {}),
                     }}>
                       {step.label}
                       {isActive && <Spinner />}
                     </span>
-                  </div>
+                  </li>
                 );
               })}
-            </div>
+            </ol>
 
             {isRunning && (
               <button onClick={handleCancel} style={styles.cancelBtn}>
@@ -235,7 +250,7 @@ export default function App() {
 
         {/* ── Error ── */}
         {phase === "error" && (
-          <div style={styles.errorCard}>
+          <div style={styles.errorCard} role="alert" aria-live="assertive">
             <span style={styles.errorIcon}>⚠</span>
             <div>
               <strong style={{ color: "#FF6B6B" }}>Something went wrong</strong>
@@ -278,7 +293,7 @@ export default function App() {
             ].map(item => (
               <div key={item.title} style={styles.howCard}>
                 <div style={styles.howIcon}>{item.icon}</div>
-                <h3 style={styles.howTitle}>{item.title}</h3>
+                <h2 style={styles.howTitle}>{item.title}</h2>
                 <p style={styles.howDesc}>{item.desc}</p>
               </div>
             ))}
@@ -291,7 +306,7 @@ export default function App() {
 
 function Stat({ label, value }) {
   return (
-    <div style={styles.stat}>
+    <div style={styles.stat} aria-label={`${label}: ${value}`}>
       <span style={styles.statValue}>{value}</span>
       <span style={styles.statLabel}>{label}</span>
     </div>
@@ -299,7 +314,7 @@ function Stat({ label, value }) {
 }
 
 function Spinner() {
-  return <span style={styles.spinner} />;
+  return <span style={styles.spinner} aria-hidden="true" />;
 }
 
 // ── Styles ─────────────────────────────────────────────────────────────────
@@ -356,7 +371,7 @@ const styles = {
   },
   tagline: {
     fontSize: 15,
-    color: "#888",
+    color: "#A0A0B4",
     maxWidth: 480,
     margin: "0 auto",
     lineHeight: 1.6,
@@ -384,7 +399,7 @@ const styles = {
   },
   urlPrefix: {
     padding: "0 10px",
-    color: "#666",
+    color: "#8A8A9A",
     fontSize: 13,
     whiteSpace: "nowrap",
     borderRight: "1px solid rgba(255,255,255,0.08)",
@@ -418,7 +433,7 @@ const styles = {
   authToggle: {
     background: "none",
     border: "none",
-    color: "#666",
+    color: "#999",
     fontSize: 12,
     cursor: "pointer",
     textAlign: "left",
@@ -543,7 +558,7 @@ const styles = {
   doneStats: { display: "flex", gap: 32 },
   stat: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2 },
   statValue: { fontSize: 24, fontWeight: 700, color: "#E2C4FF" },
-  statLabel: { fontSize: 11, color: "#666", textTransform: "uppercase", letterSpacing: "0.05em" },
+  statLabel: { fontSize: 11, color: "#999", textTransform: "uppercase", letterSpacing: "0.05em" },
   downloadBtn: {
     display: "inline-block",
     background: "linear-gradient(135deg, #7C3AED, #5B21B6)",
@@ -558,7 +573,7 @@ const styles = {
   newBtn: {
     background: "none",
     border: "none",
-    color: "#666",
+    color: "#999",
     fontSize: 12,
     cursor: "pointer",
     fontFamily: "inherit",
@@ -579,7 +594,7 @@ const styles = {
   },
   howIcon: { fontSize: 22, marginBottom: 10 },
   howTitle: { fontSize: 13, fontWeight: 600, color: "#D0C0F0", margin: "0 0 6px" },
-  howDesc: { fontSize: 12, color: "#666", lineHeight: 1.6, margin: 0 },
+  howDesc: { fontSize: 12, color: "#999", lineHeight: 1.6, margin: 0 },
 };
 
 // Inject keyframes
@@ -589,5 +604,8 @@ styleEl.textContent = `
   * { box-sizing: border-box; }
   body { margin: 0; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+  }
 `;
 document.head.appendChild(styleEl);
