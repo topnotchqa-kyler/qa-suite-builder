@@ -283,4 +283,21 @@ def _build_page_context(page: dict) -> str:
         apis = list(set([r["url"] for r in page["network_requests"]]))[:5]
         lines.append(f"API endpoints called: {', '.join(apis)}")
 
+    if page.get("virtual_sections"):
+        vs_lines = []
+        for vs in page["virtual_sections"]:
+            label = f"{vs['type'].title()}: {vs.get('group_label', '')} > {vs.get('trigger_label', '')}"
+            detail = vs.get("panel_text", "")[:200]
+            headings = vs.get("panel_headings", [])
+            if headings:
+                detail += f" | Sub-sections: {', '.join(headings)}"
+            if vs.get("panel_forms"):
+                detail += " | Contains form"
+            if vs.get("panel_links"):
+                detail += f" | Links: {', '.join(vs['panel_links'][:3])}"
+            vs_lines.append(f"  - {label}: {detail}")
+        if vs_lines:
+            lines.append("Tab/Accordion panels revealed:")
+            lines.extend(vs_lines)
+
     return "\n".join(lines)
