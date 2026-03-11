@@ -8,6 +8,9 @@ import asyncio
 import json
 import os
 import re
+import urllib.request
+import xml.etree.ElementTree as ET
+from collections import defaultdict
 from urllib.parse import urljoin, urlparse
 from typing import Optional
 from playwright.async_api import async_playwright, Page, BrowserContext
@@ -37,6 +40,21 @@ _ASSET_URL_RE = re.compile(
     r'js|css|map)(\?|$)',
     re.IGNORECASE,
 )
+
+# Maps sub-sitemap filename hints to template keys.
+# Derived by stripping "-sitemap.xml" / ".xml" from child sitemap filenames
+# (e.g. "post-sitemap.xml" → "post" → "/blog/").
+_SITEMAP_TEMPLATE_HINTS: dict[str, str] = {
+    "post":      "/blog/",
+    "posts":     "/blog/",
+    "news":      "/news/",
+    "location":  "/locations/",
+    "locations": "/locations/",
+    "product":   "/product/",
+    "products":  "/product/",
+    "job":       "/jobs/",
+    "career":    "/career-listings/",
+}
 
 
 def _url_template_key(url: str) -> "str | None":
@@ -70,6 +88,166 @@ def _url_template_key(url: str) -> "str | None":
     return "/" + "/".join(segments[:-1]) + "/"
 
 
+async def _fetch_sitemap_urls(
+    base_url: str, base_domain: str
+) -> tuple[list[str], dict[str, str]]:
+    """
+    Fetch and parse sitemap.xml (handling both <urlset> and <sitemapindex> formats).
+    Returns (all_urls, hint_map) where hint_map maps url -> template_key override
+    derived from the child sitemap filename (e.g. post-sitemap.xml → "/blog/").
+    Returns ([], {}) on any error — never raises, never aborts the crawl.
+    Uses stdlib only: urllib.request + xml.etree.ElementTree + asyncio.to_thread.
+    """
+
+    def _sync_fetch_xml(url: str, timeout: int = 10) -> "ET.Element | None":
+        """Synchronous fetch + XML parse; called via asyncio.to_thread."""
+        try:
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "Mozilla/5.0 (QA-Crawler/1.0)"}
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return ET.fromstring(resp.read())
+        except Exception:
+            return None
+
+    def _sync_fetch_robots_sitemaps(robots_url: str) -> list[str]:
+        """Return all Sitemap: directive URLs from robots.txt."""
+        found: list[str] = []
+        try:
+            req = urllib.request.Request(
+                robots_url, headers={"User-Agent": "Mozilla/5.0 (QA-Crawler/1.0)"}
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                for line in resp.read().decode("utf-8", errors="replace").splitlines():
+                    if line.lower().startswith("sitemap:"):
+                        sm_url = line.split(":", 1)[1].strip()
+                        if sm_url:
+                            found.append(sm_url)
+        except Exception:
+            pass
+        return found
+
+    def _get_locs(root: ET.Element) -> list[str]:
+        """Extract all <loc> text values regardless of XML namespace prefix."""
+        return [
+            el.text.strip()
+            for el in root.iter()
+            if (el.tag == "loc" or el.tag.endswith("}loc")) and el.text
+        ]
+
+    # Build candidate list: robots.txt Sitemap: directives first, then well-known paths
+    robots_sitemaps = await asyncio.to_thread(
+        _sync_fetch_robots_sitemaps, base_domain + "/robots.txt"
+    )
+    candidates = robots_sitemaps + [
+        base_domain + "/sitemap.xml",
+        base_domain + "/sitemap_index.xml",
+    ]
+
+    all_urls: list[str] = []
+    hint_map: dict[str, str] = {}
+
+    for candidate in candidates:
+        root = await asyncio.to_thread(_sync_fetch_xml, candidate)
+        if root is None:
+            continue
+
+        tag = root.tag.lower()
+
+        if tag.endswith("sitemapindex"):
+            # Sitemap index — fetch each child sitemap (cap at 10)
+            child_sitemap_urls = _get_locs(root)[:10]
+
+            child_results = await asyncio.gather(
+                *[
+                    asyncio.wait_for(
+                        asyncio.to_thread(_sync_fetch_xml, cu, 5), timeout=7.0
+                    )
+                    for cu in child_sitemap_urls
+                ],
+                return_exceptions=True,
+            )
+
+            for child_url, child_root in zip(child_sitemap_urls, child_results):
+                if not isinstance(child_root, ET.Element):
+                    continue
+                # Derive template hint from child sitemap filename
+                # e.g. "post-sitemap.xml" → strip "-sitemap.xml" → "post" → "/blog/"
+                child_filename = urlparse(child_url).path.rsplit("/", 1)[-1]
+                hint_name = re.sub(r"[-_]sitemap\.xml$|\.xml$", "", child_filename).lower()
+                template_key = _SITEMAP_TEMPLATE_HINTS.get(hint_name)
+
+                for loc in _get_locs(child_root):
+                    if template_key:
+                        hint_map[loc] = template_key
+                    all_urls.append(loc)
+
+        elif tag.endswith("urlset"):
+            all_urls.extend(_get_locs(root))
+
+        else:
+            continue  # Unknown root element — try next candidate
+
+        if all_urls:
+            break  # First successful sitemap wins
+
+    # Filter: same-domain URLs only, no assets
+    all_urls = [
+        u for u in all_urls
+        if u.startswith(base_domain) and not _ASSET_URL_RE.search(u)
+    ]
+
+    # Deduplicate preserving order
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for u in all_urls:
+        if u not in seen:
+            seen.add(u)
+            deduped.append(u)
+
+    # Clean hint_map to only include URLs that survived filtering
+    hint_map = {k: v for k, v in hint_map.items() if k in seen}
+
+    return deduped, hint_map
+
+
+def _select_urls_from_sitemap(
+    all_urls: list[str],
+    base_domain: str,
+    hint_map: dict[str, str],
+) -> tuple[list[str], dict]:
+    """
+    Apply template detection and rep-limiting to the full sitemap URL list
+    before any pages are crawled. Returns (selected_urls, architecture_dict).
+
+    unique_pages  — URLs with no detectable template pattern (always included)
+    template_buckets — grouped by template key; capped at MAX_TEMPLATE_REPS each
+    """
+    unique_pages: list[str] = []
+    template_buckets: dict[str, list[str]] = defaultdict(list)
+
+    for url in all_urls:
+        key = hint_map.get(url) or _url_template_key(url)
+        if key is None:
+            unique_pages.append(url)
+        else:
+            template_buckets[key].append(url)
+
+    selected = list(unique_pages)
+    for key, urls in template_buckets.items():
+        selected.extend(urls[:MAX_TEMPLATE_REPS])
+
+    architecture = {
+        "total_urls_in_sitemap": len(all_urls),
+        "unique_pages": len(unique_pages),
+        "template_families": {k: len(v) for k, v in template_buckets.items()},
+        "pages_selected_for_crawl": min(len(selected), MAX_PAGES),
+        "discovery_method": "sitemap",
+    }
+    # Slight overselect; MAX_PAGES is enforced by the main crawl loop
+    return selected[:MAX_PAGES * 2], architecture
+
+
 async def crawl_site(base_url: str, username: Optional[str] = None, password: Optional[str] = None) -> dict:
     """
     Entry point. Crawls base_url up to MAX_PAGES pages deep.
@@ -78,11 +256,28 @@ async def crawl_site(base_url: str, username: Optional[str] = None, password: Op
     parsed = urlparse(base_url)
     base_domain = f"{parsed.scheme}://{parsed.netloc}"
 
-    visited = set()
-    queued = {base_url}          # prevents re-adding URLs at deeper depths
-    template_counts: dict = {}   # template_key -> number of reps already queued
-    pages_data = []
-    queue = [(base_url, 0)]  # (url, depth)
+    # --- URL Discovery: sitemap first, BFS fallback ---
+    sitemap_urls, hint_map = await _fetch_sitemap_urls(base_url, base_domain)
+
+    if sitemap_urls:
+        selected_urls, site_architecture = _select_urls_from_sitemap(
+            sitemap_urls, base_domain, hint_map
+        )
+        # Homepage always first at depth 0; all other sitemap URLs at depth 1
+        queue_seed = [u for u in selected_urls if u != base_url]
+        queue: list[tuple[str, int]] = [(base_url, 0)] + [(u, 1) for u in queue_seed]
+        queued: set[str] = {url for url, _ in queue}
+        use_sitemap = True
+    else:
+        # BFS fallback for sites with no sitemap
+        queue = [(base_url, 0)]
+        queued = {base_url}
+        site_architecture = None
+        use_sitemap = False
+
+    visited: set[str] = set()
+    template_counts: dict = {}   # template_key -> reps queued (BFS mode only)
+    pages_data: list[dict] = []
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -113,6 +308,8 @@ async def crawl_site(base_url: str, username: Optional[str] = None, password: Op
                 if logged_in:
                     post_login_url = login_page.url
                     queue = [(post_login_url, 0)]
+                    queued = {post_login_url}
+                    use_sitemap = False  # Sitemap queue not applicable after auth redirect
             except Exception:
                 pass  # Fall back to crawling public pages
             finally:
@@ -132,8 +329,9 @@ async def crawl_site(base_url: str, username: Optional[str] = None, password: Op
                 page_data = await _crawl_page(context, url, base_domain, depth)
                 pages_data.append(page_data)
 
-                # Enqueue discovered links if within depth limit
-                if depth < MAX_DEPTH:
+                # In sitemap mode: skip BFS link-following (URL inventory already known).
+                # In BFS mode: enqueue discovered links if within depth limit.
+                if not use_sitemap and depth < MAX_DEPTH:
                     # Nav links are enqueued directly from the navigation data
                     # (not via page_data["links"]) so they are never dropped by
                     # the links[:20] cap in _extract_internal_links.  This
@@ -186,9 +384,14 @@ async def crawl_site(base_url: str, username: Optional[str] = None, password: Op
 
         await browser.close()
 
+    # Update architecture with actual pages crawled (may differ from pre-crawl estimate)
+    if site_architecture is not None:
+        site_architecture["pages_selected_for_crawl"] = len(pages_data)
+
     return {
         "base_url": base_url,
         "pages_crawled": len(pages_data),
+        "site_architecture": site_architecture,
         "pages": pages_data,
     }
 
