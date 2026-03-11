@@ -84,9 +84,25 @@ async def crawl_site(base_url: str, username: Optional[str] = None, password: Op
 
                 # Enqueue discovered links if within depth limit
                 if depth < MAX_DEPTH:
+                    # Separate primary nav links from general content links.
+                    # Nav links (from <nav> elements) jump to the front of the queue
+                    # so key site sections (Franchise, About, Menu…) are always
+                    # visited before blog posts or other deep content pages that
+                    # could exhaust the MAX_PAGES budget first.
+                    nav_hrefs = {
+                        n["href"] for n in page_data.get("navigation", [])
+                        if n.get("href") and n["href"].startswith(base_domain)
+                    }
+                    nav_entries = []
+                    content_entries = []
                     for link in page_data.get("links", []):
                         if link not in visited:
-                            queue.append((link, depth + 1))
+                            if link in nav_hrefs:
+                                nav_entries.append((link, depth + 1))
+                            else:
+                                content_entries.append((link, depth + 1))
+                    # Nav links before the current queue; content links after
+                    queue = nav_entries + queue + content_entries
 
             except Exception as e:
                 pages_data.append({
