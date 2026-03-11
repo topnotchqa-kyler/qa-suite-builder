@@ -336,6 +336,7 @@ export default function App() {
         >
           Need a human QA team? TopNotch QA offers professional testing services →
         </a>
+        <p style={styles.footerCopy}>© {new Date().getFullYear()} SuiteGen</p>
       </footer>
     </div>
   );
@@ -662,6 +663,11 @@ const styles = {
     textDecoration: "none",
     borderBottom: "1px solid transparent",
     transition: "color 0.15s, border-color 0.15s",
+  },
+  footerCopy: {
+    fontSize: 11,
+    color: "#444",
+    margin: "8px 0 0",
   },
 };
 
