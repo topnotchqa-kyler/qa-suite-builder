@@ -162,6 +162,7 @@ async def generate_endpoint(request: Request, body: GenerateRequest, format: Opt
         if format == "json":
             return JSONResponse(content={
                 "pages_crawled": crawl_data.get("pages_crawled", 0),
+                "site_architecture": crawl_data.get("site_architecture"),
                 "sections_generated": len(test_suite.get("sections", [])),
                 "test_suite": test_suite,
             })
