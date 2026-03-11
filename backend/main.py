@@ -138,10 +138,10 @@ async def crawl_endpoint(request: Request, body: CrawlOnlyRequest):
 
 @app.post("/api/generate")
 @limiter.limit("10/hour")
-async def generate_endpoint(request: Request, body: GenerateRequest):
+async def generate_endpoint(request: Request, body: GenerateRequest, format: Optional[str] = None):
     """
     Full pipeline: crawl → generate test cases → return .xlsx file.
-    Streams the binary .xlsx back to the client.
+    Pass ?format=json to skip the xlsx build and return the test suite as JSON instead.
     """
     _validate_url(body.url)
     try:
@@ -157,6 +157,14 @@ async def generate_endpoint(request: Request, body: GenerateRequest):
 
         # Step 2: Generate test suite via Anthropic API
         test_suite = await asyncio.to_thread(generate_test_suite, crawl_data)
+
+        # JSON preview — skip xlsx build, return structured data directly
+        if format == "json":
+            return JSONResponse(content={
+                "pages_crawled": crawl_data.get("pages_crawled", 0),
+                "sections_generated": len(test_suite.get("sections", [])),
+                "test_suite": test_suite,
+            })
 
         # Step 3: Build .xlsx workbook
         xlsx_bytes = await asyncio.to_thread(build_workbook, test_suite)

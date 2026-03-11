@@ -5,6 +5,7 @@ and network requests from a given base URL.
 """
 
 import asyncio
+import json
 import re
 from urllib.parse import urljoin, urlparse
 from typing import Optional
@@ -43,12 +44,23 @@ async def crawl_site(base_url: str, username: Optional[str] = None, password: Op
         )
         context = await browser.new_context(
             viewport={"width": 1280, "height": 800},
-            user_agent="Mozilla/5.0 (QA-Crawler/1.0)"
+            user_agent="Mozilla/5.0 (QA-Crawler/1.0)",
+            http_credentials={"username": username, "password": password} if (username and password) else None,
         )
 
-        # Handle HTTP basic auth if provided
+        # Attempt form-based login if credentials provided
         if username and password:
-            await context.set_http_credentials({"username": username, "password": password})
+            login_page = await context.new_page()
+            try:
+                await login_page.goto(base_url, wait_until="load", timeout=15000)
+                logged_in = await _perform_form_login(login_page, username, password)
+                if logged_in:
+                    post_login_url = login_page.url
+                    queue = [(post_login_url, 0)]
+            except Exception:
+                pass  # Fall back to crawling public pages
+            finally:
+                await login_page.close()
 
         while queue and len(visited) < MAX_PAGES:
             url, depth = queue.pop(0)
@@ -290,6 +302,61 @@ async def _extract_navigation(page: Page) -> list:
         """)
     except:
         return []
+
+
+async def _perform_form_login(page: Page, username: str, password: str) -> bool:
+    """
+    Attempt to fill and submit a login form on the current page.
+    Returns True if login appears successful (URL changed after submission).
+    """
+    try:
+        # Confirm a password field is present — reliable login form indicator
+        password_field = await page.query_selector("input[type='password']")
+        if not password_field:
+            return False
+
+        # Find username/email field: prefer email type, fall back to text inputs
+        username_field = (
+            await page.query_selector("input[type='email']")
+            or await page.query_selector("input[name*='email']")
+            or await page.query_selector("input[name*='user']")
+            or await page.query_selector("input[id*='email']")
+            or await page.query_selector("input[id*='user']")
+            or await page.query_selector("input[type='text']")
+        )
+
+        if username_field:
+            await username_field.fill(username)
+        await password_field.fill(password)
+
+        # Find and click the submit button
+        submit = (
+            await page.query_selector("button[type='submit']")
+            or await page.query_selector("input[type='submit']")
+            or await page.query_selector("button:has-text('Sign in')")
+            or await page.query_selector("button:has-text('Log in')")
+            or await page.query_selector("button:has-text('Login')")
+        )
+
+        if not submit:
+            return False
+
+        initial_url = page.url
+        await submit.click()
+        try:
+            # Wait for URL change; SPAs may never reach networkidle so catch timeout
+            await page.wait_for_function(
+                f"() => location.href !== {json.dumps(initial_url)}",
+                timeout=10000,
+            )
+        except Exception:
+            pass  # Check URL below regardless
+
+        # Login succeeded if URL changed (redirected away from login page)
+        return page.url != initial_url
+
+    except Exception:
+        return False
 
 
 async def _extract_internal_links(page: Page, base_domain: str) -> list:

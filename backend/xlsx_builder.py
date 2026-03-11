@@ -174,9 +174,11 @@ def _build_dashboard(ws, test_suite: dict, sheet_names: list, sections: list):
         ws[f"D{row}"].value = tc_count
 
         # COUNTIF formulas for each status
+        # Escape apostrophes in sheet name for formula references (Excel requires '' for ')
+        safe_ref = sheet_name.replace("'", "''")
         for col, status in zip(["E", "F", "G", "H", "I"], STATUS_OPTIONS):
             cell = ws[f"{col}{row}"]
-            cell.value = f'=COUNTIF(\'{sheet_name}\'!{status_col}:{status_col},"{status}")'
+            cell.value = f'=COUNTIF(\'{safe_ref}\'!{status_col}:{status_col},"{status}")'
             cell.alignment = Alignment(horizontal="center")
 
         for col in ["B", "C", "D", "E", "F", "G", "H", "I"]:
@@ -336,8 +338,9 @@ def _make_sheet_names(sections: list) -> list:
     seen = {}
     for section in sections:
         raw = section.get("name", "Section")
-        # Strip invalid Excel sheet name characters
-        clean = "".join(c for c in raw if c not in r'\/:*?[]')
+        # Strip invalid Excel sheet name characters (apostrophes also forbidden at start/end
+        # and break formula references, so strip them entirely)
+        clean = "".join(c for c in raw if c not in r"\/:*?[]'")
         clean = clean[:28].strip()
         if not clean:
             clean = "Section"
