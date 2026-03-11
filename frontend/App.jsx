@@ -325,6 +325,18 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* ── Footer ── */}
+      <footer style={styles.footer}>
+        <a
+          href="https://topnotchqa.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={styles.footerLink}
+        >
+          Need a human QA team? TopNotch QA offers professional testing services →
+        </a>
+      </footer>
     </div>
   );
 }
@@ -637,6 +649,20 @@ const styles = {
   howIcon: { fontSize: 22, marginBottom: 10 },
   howTitle: { fontSize: 13, fontWeight: 600, color: "#D0C0F0", margin: "0 0 6px" },
   howDesc: { fontSize: 12, color: "#999", lineHeight: 1.6, margin: 0 },
+
+  footer: {
+    position: "relative",
+    zIndex: 1,
+    textAlign: "center",
+    padding: "20px 24px 32px",
+  },
+  footerLink: {
+    fontSize: 12,
+    color: "#666",
+    textDecoration: "none",
+    borderBottom: "1px solid transparent",
+    transition: "color 0.15s, border-color 0.15s",
+  },
 };
 
 // Inject keyframes
