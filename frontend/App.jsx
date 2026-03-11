@@ -124,8 +124,20 @@ export default function App() {
         {/* ── Logo / heading ── */}
         <header style={styles.header}>
           <div style={styles.logo}>
-            <span style={styles.logoIcon} aria-hidden="true">⬡</span>
-            <h1 style={styles.logoText}>QA Suite Builder</h1>
+            <svg width="42" height="42" viewBox="0 0 32 32" aria-hidden="true" style={styles.logoSvg}>
+              <defs>
+                <linearGradient id="lg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stopColor="#9333EA" />
+                  <stop offset="100%" stopColor="#6D28D9" />
+                </linearGradient>
+              </defs>
+              <rect width="32" height="32" rx="8" fill="url(#lg)" />
+              <path d="M8 16.5l5 5 11-11" stroke="#fff" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            </svg>
+            <h1 style={styles.logoText}>
+              <span style={{ color: "#F0E6FF" }}>Suite</span>
+              <span style={{ color: "#C084FC" }}>Gen</span>
+            </h1>
           </div>
           <p style={styles.tagline}>
             Crawl any URL. Generate a structured, downloadable test suite — grounded in the actual UI.
@@ -355,19 +367,19 @@ const styles = {
   logo: {
     display: "inline-flex",
     alignItems: "center",
-    gap: 10,
+    gap: 12,
     marginBottom: 16,
   },
-  logoIcon: {
-    fontSize: 28,
-    color: "#C084FC",
-    filter: "drop-shadow(0 0 8px rgba(192,132,252,0.6))",
+  logoSvg: {
+    filter: "drop-shadow(0 0 10px rgba(124,58,237,0.55))",
+    flexShrink: 0,
   },
   logoText: {
-    fontSize: 22,
+    fontSize: 30,
     fontWeight: 700,
-    letterSpacing: "-0.5px",
-    color: "#F0E6FF",
+    letterSpacing: "-0.8px",
+    margin: 0,
+    lineHeight: 1,
   },
   tagline: {
     fontSize: 15,
