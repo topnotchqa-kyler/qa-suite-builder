@@ -15,6 +15,12 @@ from playwright.async_api import async_playwright, Page, BrowserContext
 MAX_PAGES = 15  # Keep pipeline under Railway's 300s request timeout
 MAX_DEPTH = 2
 
+# In-page interaction limits (tabs / accordions)
+MAX_TAB_GROUPS = 2       # Max distinct tab groups to process per page
+MAX_TABS_PER_GROUP = 5   # Max individual tabs per group
+MAX_ACCORDIONS = 5       # Max accordion items to expand per page
+INTERACTION_TIMEOUT = 800  # ms to wait after a click for panel content to render
+
 
 async def crawl_site(base_url: str, username: Optional[str] = None, password: Optional[str] = None) -> dict:
     """
@@ -93,6 +99,7 @@ async def crawl_site(base_url: str, username: Optional[str] = None, password: Op
                     "interactive_elements": [],
                     "links": [],
                     "network_requests": [],
+                    "virtual_sections": [],
                 })
 
         await browser.close()
@@ -132,6 +139,17 @@ async def _crawl_page(context: BrowserContext, url: str, base_domain: str, depth
         links = await _extract_internal_links(page, base_domain)
         nav_items = await _extract_navigation(page)
 
+        # In-page feature extraction: tabs and accordions (depth-gated to protect timeout budget)
+        virtual_sections = []
+        if depth < MAX_DEPTH:
+            try:
+                virtual_sections = await asyncio.wait_for(
+                    _extract_virtual_sections(page),
+                    timeout=12.0,
+                )
+            except Exception:
+                pass  # Never block the crawl for virtual section failures
+
         return {
             "url": url,
             "depth": depth,
@@ -143,6 +161,7 @@ async def _crawl_page(context: BrowserContext, url: str, base_domain: str, depth
             "navigation": nav_items,
             "links": links,
             "network_requests": network_requests[:20],  # Cap to 20 per page
+            "virtual_sections": virtual_sections,
         }
     finally:
         await page.close()
@@ -302,6 +321,248 @@ async def _extract_navigation(page: Page) -> list:
         """)
     except:
         return []
+
+
+async def _extract_virtual_sections(page: Page) -> list:
+    """
+    Coordinator: detect tabs and accordions, activate each, and extract revealed content.
+    Returns a list of virtual_section dicts representing each hidden content state found.
+    """
+    virtual_sections = []
+
+    try:
+        vs_tabs = await _extract_tab_virtual_sections(page)
+        virtual_sections.extend(vs_tabs)
+    except Exception:
+        pass
+
+    try:
+        vs_accordions = await _extract_accordion_virtual_sections(page)
+        virtual_sections.extend(vs_accordions)
+    except Exception:
+        pass
+
+    return virtual_sections
+
+
+async def _extract_tab_virtual_sections(page: Page) -> list:
+    """
+    Click each tab in each tablist and extract the revealed panel content.
+    Uses index-based JS interaction to avoid stale ElementHandle issues after DOM mutations.
+    """
+    results = []
+
+    # Collect all tab group metadata upfront in a single JS call
+    groups = await page.evaluate(f"""
+        () => {{
+            const TAB_GROUP_LIMIT = {MAX_TAB_GROUPS};
+            const TAB_LIMIT = {MAX_TABS_PER_GROUP};
+            const tablists = [...document.querySelectorAll('[role="tablist"], .nav-tabs, [data-tabs]')]
+                .slice(0, TAB_GROUP_LIMIT);
+
+            return tablists.map((tablist, ti) => {{
+                // Derive group label
+                let groupLabel = tablist.getAttribute('aria-label');
+                if (!groupLabel) {{
+                    const labelId = tablist.getAttribute('aria-labelledby');
+                    if (labelId) {{
+                        const el = document.getElementById(labelId);
+                        if (el) groupLabel = el.innerText.trim().slice(0, 60);
+                    }}
+                }}
+                if (!groupLabel) {{
+                    let prev = tablist.previousElementSibling;
+                    while (prev) {{
+                        if (/^H[1-6]$/.test(prev.tagName)) {{ groupLabel = prev.innerText.trim().slice(0, 60); break; }}
+                        prev = prev.previousElementSibling;
+                    }}
+                }}
+                if (!groupLabel) groupLabel = 'Tab Group ' + (ti + 1);
+
+                const triggers = [...tablist.querySelectorAll('[role="tab"], .nav-link')]
+                    .slice(0, TAB_LIMIT)
+                    .map((t, i) => ({{
+                        tablistIndex: ti,
+                        triggerIndex: i,
+                        label: (t.innerText || t.getAttribute('aria-label') || '').trim().slice(0, 80),
+                        href: t.getAttribute('href') || '',
+                        isSelected: t.getAttribute('aria-selected') === 'true' || t.classList.contains('active'),
+                    }}))
+                    .filter(t => t.label && (!t.href || t.href.startsWith('#')));
+
+                return {{ groupLabel, tablistIndex: ti, triggers }};
+            }});
+        }}
+    """)
+
+    for group in groups:
+        group_label = group["groupLabel"]
+        tablist_idx = group["tablistIndex"]
+
+        for trigger_meta in group["triggers"]:
+            tab_idx = trigger_meta["triggerIndex"]
+            trigger_label = trigger_meta["label"]
+            is_selected = trigger_meta["isSelected"]
+
+            # Skip click for the default-selected first tab — it's already visible
+            if not (is_selected and tab_idx == 0):
+                try:
+                    # Click by index via JS — no stale ElementHandle risk
+                    await page.evaluate(f"""
+                        () => {{
+                            const tablists = [...document.querySelectorAll('[role="tablist"], .nav-tabs, [data-tabs]')];
+                            const tablist = tablists[{tablist_idx}];
+                            if (!tablist) return;
+                            const triggers = [...tablist.querySelectorAll('[role="tab"], .nav-link')];
+                            const trigger = triggers[{tab_idx}];
+                            if (trigger) trigger.click();
+                        }}
+                    """)
+                    await page.wait_for_timeout(INTERACTION_TIMEOUT)
+                except Exception:
+                    continue
+
+            panel_data = await page.evaluate(f"""
+                () => {{
+                    const tablists = [...document.querySelectorAll('[role="tablist"], .nav-tabs, [data-tabs]')];
+                    const tablist = tablists[{tablist_idx}];
+                    if (!tablist) return null;
+                    const triggers = [...tablist.querySelectorAll('[role="tab"], .nav-link')];
+                    const trigger = triggers[{tab_idx}];
+
+                    let panel = null;
+
+                    // Tier 1: aria-controls
+                    if (trigger) {{
+                        const cid = trigger.getAttribute('aria-controls');
+                        if (cid) panel = document.getElementById(cid);
+                    }}
+
+                    // Tier 2: visible [role="tabpanel"] within tablist parent
+                    if (!panel) {{
+                        const root = tablist.parentElement || document.body;
+                        panel = [...root.querySelectorAll('[role="tabpanel"]')].find(p =>
+                            !p.hidden &&
+                            p.getAttribute('aria-hidden') !== 'true' &&
+                            getComputedStyle(p).display !== 'none' &&
+                            getComputedStyle(p).visibility !== 'hidden'
+                        );
+                    }}
+
+                    // Tier 3: Bootstrap .tab-pane.active
+                    if (!panel) {{
+                        const root = tablist.parentElement || document.body;
+                        panel = root.querySelector('.tab-pane.active, .tab-panel.active, .tab-content > .active');
+                    }}
+
+                    if (!panel) return null;
+
+                    return {{
+                        panel_text: (panel.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 600),
+                        panel_headings: [...panel.querySelectorAll('h1,h2,h3,h4')]
+                            .map(h => h.innerText.trim().slice(0, 80)).filter(Boolean).slice(0, 5),
+                        panel_forms: panel.querySelector('form') !== null,
+                        panel_links: [...panel.querySelectorAll('a')]
+                            .map(a => a.innerText.trim().slice(0, 60)).filter(Boolean).slice(0, 5),
+                    }};
+                }}
+            """)
+
+            if panel_data and panel_data.get("panel_text"):
+                results.append({
+                    "type": "tab",
+                    "group_label": group_label,
+                    "trigger_label": trigger_label,
+                    **panel_data,
+                })
+
+    return results
+
+
+async def _extract_accordion_virtual_sections(page: Page) -> list:
+    """
+    Expand each <details>/<summary> accordion and extract the revealed content.
+    Uses index-based JS interaction to avoid stale ElementHandle issues after DOM mutations.
+    """
+    results = []
+
+    # Collect all accordion metadata upfront in a single JS call
+    items = await page.evaluate(f"""
+        () => {{
+            const LIMIT = {MAX_ACCORDIONS};
+            return [...document.querySelectorAll('details > summary')]
+                .slice(0, LIMIT)
+                .map((summary, i) => {{
+                    const details = summary.parentElement;
+                    const wrapper = details.parentElement;
+                    const heading = wrapper ? wrapper.querySelector('h1,h2,h3,h4') : null;
+                    return {{
+                        index: i,
+                        label: summary.innerText.trim().slice(0, 80),
+                        wasOpen: details.open,
+                        groupLabel: heading ? heading.innerText.trim().slice(0, 60) : 'Accordion',
+                    }};
+                }})
+                .filter(item => item.label);
+        }}
+    """)
+
+    for item in items:
+        idx = item["index"]
+        trigger_label = item["label"]
+        group_label = item["groupLabel"]
+        was_open = item["wasOpen"]
+
+        if not was_open:
+            try:
+                await page.evaluate(f"""
+                    () => {{
+                        const summaries = [...document.querySelectorAll('details > summary')];
+                        if (summaries[{idx}]) summaries[{idx}].click();
+                    }}
+                """)
+                await page.wait_for_timeout(INTERACTION_TIMEOUT)
+            except Exception:
+                continue
+
+        panel_data = await page.evaluate(f"""
+            () => {{
+                const details = [...document.querySelectorAll('details')][{idx}];
+                if (!details || !details.open) return null;
+                const clone = details.cloneNode(true);
+                const s = clone.querySelector('summary');
+                if (s) s.remove();
+                const text = (clone.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 600);
+                if (!text) return null;
+                return {{
+                    panel_text: text,
+                    panel_headings: [...details.querySelectorAll('h1,h2,h3,h4')]
+                        .map(h => h.innerText.trim().slice(0, 80)).filter(Boolean).slice(0, 5),
+                    panel_forms: details.querySelector('form') !== null,
+                    panel_links: [...details.querySelectorAll('a')]
+                        .map(a => a.innerText.trim().slice(0, 60)).filter(Boolean).slice(0, 5),
+                }};
+            }}
+        """)
+
+        if panel_data:
+            results.append({
+                "type": "accordion",
+                "group_label": group_label,
+                "trigger_label": trigger_label,
+                **panel_data,
+            })
+
+        # Restore to closed if it was closed before we opened it
+        if not was_open:
+            try:
+                await page.evaluate(f"""
+                    () => {{ const d = [...document.querySelectorAll('details')][{idx}]; if (d) d.open = false; }}
+                """)
+            except Exception:
+                pass
+
+    return results
 
 
 async def _perform_form_login(page: Page, username: str, password: str) -> bool:
