@@ -2,6 +2,8 @@
 
 Generate a comprehensive, structured QA test suite for any website — powered by Playwright crawling and Claude AI.
 
+**Live:** [suitegen.dev](https://suitegen.dev)
+
 ## How it works
 
 1. **Crawl** — Playwright maps every reachable page: DOM structure, form fields, button labels, nav items, API calls
@@ -10,15 +12,37 @@ Generate a comprehensive, structured QA test suite for any website — powered b
 
 ---
 
-## Setup
+## Deployment
+
+| Service | Platform | Branch |
+|---------|----------|--------|
+| Frontend | Vercel ([suitegen.dev](https://suitegen.dev)) | `main` |
+| Backend | Railway | `main` |
+
+Environment variables required:
+
+**Backend (Railway)**
+
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_API_KEY` | Your Anthropic API key |
+| `PORT` | Set to `8000` (required — Railway routes to this port) |
+
+**Frontend (Vercel)**
+
+| Variable | Description |
+|----------|-------------|
+| `VITE_API_URL` | Backend URL, e.g. `https://your-service.railway.app` |
+
+---
+
+## Local Development
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - Node.js 18+
 - An Anthropic API key
-
----
 
 ### Backend
 
@@ -47,9 +71,13 @@ cd frontend
 # Install Node dependencies
 npm install
 
+# Create .env.local from example
+cp .env.example .env.local
+# → Set VITE_API_URL=http://localhost:8000
+
 # Start the dev server
 npm run dev
-# → Open http://localhost:3000
+# → Open http://localhost:5173
 ```
 
 ---
@@ -58,32 +86,36 @@ npm run dev
 
 ```
 qa-suite-builder/
+├── Dockerfile               # Root Dockerfile used by Railway
+├── railway.json             # Railway deploy config
+├── vercel.json              # Vercel build config
 ├── backend/
-│   ├── main.py          # FastAPI routes (thin handlers)
-│   ├── crawler.py       # Playwright crawl service
-│   ├── generation.py    # Anthropic AI generation service
-│   ├── xlsx_builder.py  # openpyxl workbook builder
+│   ├── main.py              # FastAPI routes (thin handlers)
+│   ├── crawler.py           # Playwright crawl service
+│   ├── generation.py        # Anthropic AI generation service
+│   ├── xlsx_builder.py      # openpyxl workbook builder
+│   ├── Dockerfile           # Backend-only Dockerfile
 │   ├── requirements.txt
 │   └── .env.example
 └── frontend/
-    ├── src/
-│   ├── App.jsx      # Main React component
-│   └── main.jsx     # Entry point
+    ├── App.jsx              # Main React component
+    ├── main.jsx             # Entry point
     ├── index.html
     ├── package.json
-    └── vite.config.js
+    ├── vite.config.js
+    └── .env.example
 ```
 
 ---
 
 ## API Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET`  | `/health` | Health check |
-| `POST` | `/api/crawl` | Crawl only — returns raw JSON |
-| `POST` | `/api/generate` | Full pipeline → `.xlsx` download |
-| `POST` | `/api/generate-from-crawl` | Generate from existing crawl data |
+| Method | Path | Rate limit | Description |
+|--------|------|------------|-------------|
+| `GET`  | `/health` | — | Health check |
+| `POST` | `/api/crawl` | 20/hr per IP | Crawl only — returns raw JSON |
+| `POST` | `/api/generate` | 10/hr per IP | Full pipeline → `.xlsx` download |
+| `POST` | `/api/generate-from-crawl` | 10/hr per IP | Generate from existing crawl data |
 
 ### Request body (`/api/generate`)
 
@@ -94,6 +126,8 @@ qa-suite-builder/
   "password": null
 }
 ```
+
+`username` and `password` are optional HTTP Basic Auth credentials for password-protected sites.
 
 ---
 
@@ -112,15 +146,22 @@ The `.xlsx` workbook contains:
 
 ---
 
+## Security
+
+- **SSRF protection** — user-supplied URLs are validated before crawling; private IP ranges, loopback addresses, and cloud metadata endpoints are blocked
+- **Rate limiting** — per-IP request limits enforced on all generation endpoints
+- **No credentials stored** — API keys and auth credentials are never persisted
+
+---
+
 ## Configuration
 
-| Variable | Description |
-|----------|-------------|
-| `ANTHROPIC_API_KEY` | Your Anthropic API key (required) |
-
 Crawler limits (editable in `crawler.py`):
-- `MAX_PAGES = 30` — max pages crawled per run
-- `MAX_DEPTH = 3` — max link depth from base URL
+
+| Constant | Default | Description |
+|----------|---------|-------------|
+| `MAX_PAGES` | `15` | Max pages crawled per run |
+| `MAX_DEPTH` | `2` | Max link depth from base URL |
 
 ---
 
