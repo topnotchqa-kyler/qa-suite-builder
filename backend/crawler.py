@@ -6,20 +6,68 @@ and network requests from a given base URL.
 
 import asyncio
 import json
+import os
 import re
 from urllib.parse import urljoin, urlparse
 from typing import Optional
 from playwright.async_api import async_playwright, Page, BrowserContext
 
 
-MAX_PAGES = 15  # Keep pipeline under Railway's 300s request timeout
-MAX_DEPTH = 2
+# Override via env vars for local development (no Railway 300s timeout applies).
+# Production defaults are conservative to stay well under Railway's limit.
+MAX_PAGES = int(os.getenv("MAX_PAGES", "20"))
+MAX_DEPTH = int(os.getenv("MAX_DEPTH", "2"))
+# Max representatives crawled per detected URL template (e.g. blog posts, location pages).
+# Production: 1 keeps the budget free for structurally distinct pages.
+# Local: set MAX_TEMPLATE_REPS=3 in .env for cross-instance coverage.
+MAX_TEMPLATE_REPS = int(os.getenv("MAX_TEMPLATE_REPS", "1"))
 
 # In-page interaction limits (tabs / accordions)
 MAX_TAB_GROUPS = 2       # Max distinct tab groups to process per page
 MAX_TABS_PER_GROUP = 5   # Max individual tabs per group
 MAX_ACCORDIONS = 5       # Max accordion items to expand per page
 INTERACTION_TIMEOUT = 800  # ms to wait after a click for panel content to render
+
+# Asset file extensions that should never be treated as crawlable pages.
+_ASSET_URL_RE = re.compile(
+    r'\.(jpg|jpeg|png|gif|svg|webp|ico|bmp|tiff|'
+    r'pdf|doc|docx|xls|xlsx|ppt|pptx|zip|tar|gz|rar|'
+    r'mp4|mp3|wav|avi|mov|webm|ogg|'
+    r'woff|woff2|ttf|eot|otf|'
+    r'js|css|map)(\?|$)',
+    re.IGNORECASE,
+)
+
+
+def _url_template_key(url: str) -> "str | None":
+    """
+    Return a template key if this URL looks like an instance of a repeated
+    page template, otherwise return None.
+
+    A URL is a template instance when it has 2+ path segments and the terminal
+    segment is a slug (contains a hyphen) or is purely numeric (date archives).
+
+    Examples:
+      /blog/spring-at-ziggis-coffee/           -> "/blog/"
+      /locations/15-s-rockrimmon-blvd-co/      -> "/locations/"
+      /career-listings/assistant-manager-sc/   -> "/career-listings/"
+      /menu-category/hot-coffees/              -> "/menu-category/"
+      /blog/2026/03/                           -> "/blog/2026/"
+      /about/                                  -> None  (single segment)
+      /franchise/                              -> None  (single segment)
+    """
+    parsed = urlparse(url)
+    path = parsed.path.rstrip("/")
+    if not path:
+        return None
+    segments = [s for s in path.split("/") if s]
+    if len(segments) < 2:
+        return None
+    terminal = segments[-1]
+    is_slug = ("-" in terminal) or terminal.isdigit()
+    if not is_slug:
+        return None
+    return "/" + "/".join(segments[:-1]) + "/"
 
 
 async def crawl_site(base_url: str, username: Optional[str] = None, password: Optional[str] = None) -> dict:
@@ -31,6 +79,8 @@ async def crawl_site(base_url: str, username: Optional[str] = None, password: Op
     base_domain = f"{parsed.scheme}://{parsed.netloc}"
 
     visited = set()
+    queued = {base_url}          # prevents re-adding URLs at deeper depths
+    template_counts: dict = {}   # template_key -> number of reps already queued
     pages_data = []
     queue = [(base_url, 0)]  # (url, depth)
 
@@ -84,14 +134,46 @@ async def crawl_site(base_url: str, username: Optional[str] = None, password: Op
 
                 # Enqueue discovered links if within depth limit
                 if depth < MAX_DEPTH:
+                    # Nav links are enqueued directly from the navigation data
+                    # (not via page_data["links"]) so they are never dropped by
+                    # the links[:20] cap in _extract_internal_links.  This
+                    # ensures top-level pages like /franchise/ reach depth=1
+                    # even when the homepage has more than 20 unique links.
+                    nav_hrefs = {
+                        n["href"] for n in page_data.get("navigation", [])
+                        if n.get("href") and n["href"].startswith(base_domain)
+                    }
+                    # Only enqueue URLs not already queued — prevents the same
+                    # URL being re-added at increasing depths as every page
+                    # re-discovers the shared nav bar.
+                    nav_entries = [
+                        (href, depth + 1)
+                        for href in nav_hrefs
+                        if href not in visited and href not in queued
+                    ]
+                    content_entries = []
                     for link in page_data.get("links", []):
-                        if link not in visited:
-                            queue.append((link, depth + 1))
+                        if link in visited or link in queued or link in nav_hrefs:
+                            continue
+                        key = _url_template_key(link)
+                        if key is not None:
+                            if template_counts.get(key, 0) >= MAX_TEMPLATE_REPS:
+                                continue  # Enough reps for this template — skip
+                            template_counts[key] = template_counts.get(key, 0) + 1
+                        content_entries.append((link, depth + 1))
+
+                    for href, _ in nav_entries:
+                        queued.add(href)
+                    for link, _ in content_entries:
+                        queued.add(link)
+                    # Nav links before the current queue; content links after
+                    queue = nav_entries + queue + content_entries
 
             except Exception as e:
                 pages_data.append({
                     "url": url,
                     "depth": depth,
+                    "template_key": _url_template_key(url),
                     "error": str(e),
                     "title": "Error",
                     "sections": [],
@@ -153,6 +235,7 @@ async def _crawl_page(context: BrowserContext, url: str, base_domain: str, depth
         return {
             "url": url,
             "depth": depth,
+            "template_key": _url_template_key(url),  # None for unique pages
             "title": title,
             "page_text_sample": page_text_sample,
             "sections": sections,
@@ -635,6 +718,8 @@ async def _extract_internal_links(page: Page, base_domain: str) -> list:
                 return [...new Set(hrefs)].filter(h => h.startsWith(baseDomain));
             }
         """, base_domain)
-        return links[:20]
+        # Strip asset/binary URLs — they are never crawlable pages
+        page_links = [h for h in links if not _ASSET_URL_RE.search(h)]
+        return page_links[:20]
     except:
         return []
