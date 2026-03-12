@@ -12,10 +12,12 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 MODEL = "claude-sonnet-4-20250514"
 
 
-def generate_test_suite(crawl_data: dict) -> dict:
+def generate_test_suite(crawl_data: dict, api_key: str = None) -> dict:
     """
     Main entry point. Takes crawl_data from crawler.py and returns
     a structured test suite ready for xlsx_builder.py.
+
+    api_key: optional user-supplied Anthropic key; falls back to ANTHROPIC_API_KEY env var.
 
     Returns:
         {
@@ -42,7 +44,10 @@ def generate_test_suite(crawl_data: dict) -> dict:
             ]
         }
     """
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    resolved_key = api_key or ANTHROPIC_API_KEY
+    if not resolved_key:
+        raise ValueError("No Anthropic API key provided. Pass an API key in the X-Api-Key header.")
+    client = anthropic.Anthropic(api_key=resolved_key)
 
     pages = crawl_data.get("pages", [])
     base_url = crawl_data.get("base_url", "")
