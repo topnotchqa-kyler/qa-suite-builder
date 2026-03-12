@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -262,7 +262,7 @@ function SectionCard({ section, defaultExpanded, isLast }) {
 
 // ── TestSuiteViewer ───────────────────────────────────────────────────────────
 
-function TestSuiteViewer({ testSuite, crawlData, onDownloadXlsx, isDownloading }) {
+function TestSuiteViewer({ testSuite, crawlData, onDownloadXlsx, isDownloading, suiteId, onCopyLink, linkCopied }) {
   const totalTests = (testSuite.sections || []).reduce((sum, s) => sum + (s.test_cases || []).length, 0);
 
   return (
@@ -293,27 +293,47 @@ function TestSuiteViewer({ testSuite, crawlData, onDownloadXlsx, isDownloading }
             </p>
           )}
         </div>
-        <button
-          onClick={onDownloadXlsx}
-          disabled={isDownloading}
-          style={{
-            background: isDownloading ? "rgba(124,58,237,0.2)" : "linear-gradient(135deg,#7C3AED,#5B21B6)",
-            color: "#fff",
-            border: "none",
-            borderRadius: 9,
-            padding: "10px 18px",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: isDownloading ? "not-allowed" : "pointer",
-            whiteSpace: "nowrap",
-            opacity: isDownloading ? 0.6 : 1,
-            fontFamily: "inherit",
-            flexShrink: 0,
-            transition: "opacity 0.15s",
-          }}
-        >
-          {isDownloading ? "Preparing…" : "⬇ Download .xlsx"}
-        </button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end", flexShrink: 0 }}>
+          <button
+            onClick={onDownloadXlsx}
+            disabled={isDownloading}
+            style={{
+              background: isDownloading ? "rgba(124,58,237,0.2)" : "linear-gradient(135deg,#7C3AED,#5B21B6)",
+              color: "#fff",
+              border: "none",
+              borderRadius: 9,
+              padding: "10px 18px",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: isDownloading ? "not-allowed" : "pointer",
+              whiteSpace: "nowrap",
+              opacity: isDownloading ? 0.6 : 1,
+              fontFamily: "inherit",
+              transition: "opacity 0.15s",
+            }}
+          >
+            {isDownloading ? "Preparing…" : "⬇ Download .xlsx"}
+          </button>
+          {suiteId && (
+            <button
+              onClick={onCopyLink}
+              style={{
+                background: "none",
+                border: "1px solid rgba(192,132,252,0.25)",
+                borderRadius: 7,
+                padding: "6px 12px",
+                fontSize: 11,
+                color: linkCopied ? "#86EFAC" : "#9070C0",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                whiteSpace: "nowrap",
+                transition: "color 0.15s",
+              }}
+            >
+              {linkCopied ? "✓ Link copied" : "🔗 Copy link"}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Sections */}
@@ -349,8 +369,36 @@ export default function App() {
   const [submittedUrl, setSubmittedUrl] = useState(""); // URL shown during active phases
   const [crawlData, setCrawlData]       = useState(null);
   const [testSuiteData, setTestSuiteData] = useState(null);
+  const [suiteId, setSuiteId]             = useState(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [linkCopied, setLinkCopied]       = useState(false);
   const abortRef = useRef(null);
+
+  // ── Load shared suite from ?suite=<id> on first render ───────────────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sharedId = params.get("suite");
+    if (!sharedId) return;
+
+    setPhase("generating"); // reuse spinner while loading
+    fetch(`${API_BASE}/api/suites/${sharedId}`)
+      .then(res => {
+        if (!res.ok) throw new Error("Suite not found");
+        return res.json();
+      })
+      .then(data => {
+        setCrawlData(data.crawl_data);
+        setTestSuiteData(data.test_suite);
+        setSubmittedUrl(data.base_url || "");
+        setSuiteId(sharedId);
+        setPhase("done");
+      })
+      .catch(() => {
+        setError("Could not load the shared suite. The link may be invalid or expired.");
+        setPhase("error");
+        window.history.replaceState({}, "", "/");
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isActive = phase === "crawling" || phase === "generating";
 
@@ -369,6 +417,14 @@ export default function App() {
   ];
 
   // ── Handlers ────────────────────────────────────────────────────────────────
+
+  function handleCopyLink() {
+    const url = `${window.location.origin}/?suite=${suiteId}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    });
+  }
 
   async function handleCrawl(e) {
     e.preventDefault();
@@ -424,6 +480,10 @@ export default function App() {
       }
       const data = await res.json();
       setTestSuiteData(data.test_suite);
+      if (data.suite_id) {
+        setSuiteId(data.suite_id);
+        window.history.pushState({}, "", `/?suite=${data.suite_id}`);
+      }
       setPhase("done");
     } catch (err) {
       if (err.name === "AbortError") return;
@@ -433,14 +493,17 @@ export default function App() {
   }
 
   async function handleDownloadXlsx() {
-    if (!crawlData || isDownloading) return;
+    if (isDownloading) return;
     setIsDownloading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/generate-from-crawl`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(apiKey ? { "X-Api-Key": apiKey } : {}) },
-        body: JSON.stringify(crawlData),
-      });
+      // If we have a saved suite ID, download directly — no AI call needed
+      const res = suiteId
+        ? await fetch(`${API_BASE}/api/suites/${suiteId}/xlsx`)
+        : await fetch(`${API_BASE}/api/generate-from-crawl`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...(apiKey ? { "X-Api-Key": apiKey } : {}) },
+            body: JSON.stringify(crawlData),
+          });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail || `Server error ${res.status}`);
@@ -474,9 +537,12 @@ export default function App() {
     setPhase("idle");
     setCrawlData(null);
     setTestSuiteData(null);
+    setSuiteId(null);
     setError("");
     setIsDownloading(false);
     setSubmittedUrl("");
+    setLinkCopied(false);
+    window.history.replaceState({}, "", "/");
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -725,6 +791,9 @@ export default function App() {
             crawlData={crawlData}
             onDownloadXlsx={handleDownloadXlsx}
             isDownloading={isDownloading}
+            suiteId={suiteId}
+            onCopyLink={handleCopyLink}
+            linkCopied={linkCopied}
           />
         )}
 
