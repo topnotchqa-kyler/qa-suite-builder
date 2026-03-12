@@ -343,7 +343,7 @@ export default function App() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showAuth, setShowAuth] = useState(false);
-  const [apiKey, setApiKey]     = useState(() => localStorage.getItem("sg_api_key") || "");
+  const [apiKey, setApiKey]     = useState("");
   const [phase, setPhase]       = useState("idle"); // idle|crawling|crawled|generating|done|error
   const [error, setError]       = useState("");
   const [submittedUrl, setSubmittedUrl] = useState(""); // URL shown during active phases
@@ -369,11 +369,6 @@ export default function App() {
   ];
 
   // ── Handlers ────────────────────────────────────────────────────────────────
-
-  function handleApiKeyChange(val) {
-    setApiKey(val);
-    localStorage.setItem("sg_api_key", val);
-  }
 
   async function handleCrawl(e) {
     e.preventDefault();
@@ -565,7 +560,7 @@ export default function App() {
                   <input
                     type="password"
                     value={apiKey}
-                    onChange={e => handleApiKeyChange(e.target.value)}
+                    onChange={e => setApiKey(e.target.value)}
                     placeholder="sk-ant-api03-…"
                     style={styles.urlInput}
                     autoComplete="off"
