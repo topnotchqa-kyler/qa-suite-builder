@@ -26,6 +26,7 @@ load_dotenv()
 from crawler import crawl_site
 from generation import generate_test_suite
 from xlsx_builder import build_workbook
+from storage import save_suite, get_suite, list_suites
 
 
 logger = logging.getLogger(__name__)
@@ -209,10 +210,18 @@ async def generate_from_crawl_endpoint(request: Request, crawl_data: dict, forma
     try:
         test_suite = await asyncio.to_thread(generate_test_suite, crawl_data, api_key)
 
+        # Save to Supabase — best-effort, never fails the request
+        suite_id = None
+        try:
+            suite_id = await asyncio.to_thread(save_suite, crawl_data, test_suite)
+        except Exception:
+            logger.warning("Supabase save failed; continuing without persistence")
+
         # JSON mode — return structured data for the inline viewer
         if format == "json":
             return JSONResponse(content={
                 "sections_generated": len(test_suite.get("sections", [])),
+                "suite_id": suite_id,
                 "test_suite": test_suite,
             })
 
@@ -234,3 +243,57 @@ async def generate_from_crawl_endpoint(request: Request, crawl_data: dict, forma
     except Exception:
         logger.exception("Generate-from-crawl error")
         raise HTTPException(status_code=500, detail="An error occurred generating the test suite. Please try again.")
+
+
+@app.get("/api/suites")
+async def list_suites_endpoint():
+    """Return the 20 most recently generated suites (metadata only)."""
+    try:
+        suites = await asyncio.to_thread(list_suites)
+        return JSONResponse(content={"suites": suites})
+    except Exception:
+        logger.exception("List suites error")
+        raise HTTPException(status_code=500, detail="Could not retrieve suites.")
+
+
+@app.get("/api/suites/{suite_id}")
+async def get_suite_endpoint(suite_id: str):
+    """Fetch a saved suite by UUID — returns crawl_data + test_suite."""
+    try:
+        suite = await asyncio.to_thread(get_suite, suite_id)
+    except Exception:
+        logger.exception("Get suite error for id: %s", suite_id)
+        raise HTTPException(status_code=500, detail="Could not retrieve suite.")
+    if not suite:
+        raise HTTPException(status_code=404, detail="Suite not found.")
+    return JSONResponse(content=suite)
+
+
+@app.get("/api/suites/{suite_id}/xlsx")
+async def download_suite_xlsx(suite_id: str):
+    """Build and download an .xlsx for a previously saved suite (no AI call)."""
+    try:
+        suite = await asyncio.to_thread(get_suite, suite_id)
+    except Exception:
+        logger.exception("Get suite error for id: %s", suite_id)
+        raise HTTPException(status_code=500, detail="Could not retrieve suite.")
+    if not suite:
+        raise HTTPException(status_code=404, detail="Suite not found.")
+
+    test_suite = suite["test_suite"]
+    try:
+        xlsx_bytes = await asyncio.to_thread(build_workbook, test_suite)
+    except Exception:
+        logger.exception("Workbook build error for suite: %s", suite_id)
+        raise HTTPException(status_code=500, detail="Could not build workbook.")
+
+    site_name = _sanitize_filename(
+        test_suite.get("site_name", "qa_suite").lower().replace(" ", "_")
+    )
+    filename = f"{site_name}_qa_suite.xlsx"
+
+    return StreamingResponse(
+        io.BytesIO(xlsx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
