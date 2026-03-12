@@ -1429,7 +1429,7 @@ const styles = {
   userPill: {
     position: "fixed",
     top: 16,
-    right: 108,
+    right: 120,
     zIndex: 10,
     display: "flex",
     alignItems: "center",
@@ -1444,7 +1444,7 @@ const styles = {
   signInBtn: {
     position: "fixed",
     top: 16,
-    right: 108,
+    right: 120,
     zIndex: 10,
     display: "flex",
     alignItems: "center",
@@ -1495,7 +1495,7 @@ styleEl.textContent = `
     .sg-gen-btn  { padding: 12px 24px !important; width: 100% !important; }
     .sg-github span { display: none !important; }
     .sg-github { padding: 6px 8px !important; gap: 0 !important; }
-    .sg-auth-btn { right: 60px !important; }
+    .sg-auth-btn { right: 72px !important; }
   }
 `;
 document.head.appendChild(styleEl);
