@@ -5,7 +5,7 @@
 - All feature work branches off `v2`. PRs merge back into `v2`. `v2` → `main` only when ready to ship.
 - `develop` and `main` are frozen for v1 hotfixes only — no v2 work goes there.
 - The user merges PRs themselves and confirms with "PR has been merged."
-- After every PR merge, update `README.md` to reflect any new files, env vars, endpoints, setup steps, or behaviour changes introduced by that PR.
+- Update `README.md` as part of any PR that introduces new files, env vars, API endpoints, setup steps, or significant behaviour changes — include the README update in the same branch so it lands in the same merge.
 - After every edit session, verify with a preview screenshot and a console error check before declaring work done.
 
 ## Testing
