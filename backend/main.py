@@ -11,7 +11,7 @@ import socket
 from typing import Optional
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
@@ -23,6 +23,7 @@ import io
 
 load_dotenv()
 
+from auth import get_optional_user_id
 from crawler import crawl_site
 from generation import generate_test_suite
 from xlsx_builder import build_workbook
@@ -200,11 +201,18 @@ async def generate_endpoint(request: Request, body: GenerateRequest, format: Opt
 
 @app.post("/api/generate-from-crawl")
 @limiter.limit("10/hour")
-async def generate_from_crawl_endpoint(request: Request, crawl_data: dict, format: Optional[str] = None):
+async def generate_from_crawl_endpoint(
+    request: Request,
+    crawl_data: dict,
+    format: Optional[str] = None,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
     """
     Generate from pre-existing crawl data (skip crawl step).
     Pass ?format=json to return the test suite as JSON instead of an .xlsx file.
     Requires either X-Api-Key header (user-supplied) or ANTHROPIC_API_KEY env var.
+    If a valid Supabase JWT is present in the Authorization header, the generated
+    suite is associated with that user's account.
     """
     api_key = request.headers.get("x-api-key") or None
     try:
@@ -213,7 +221,7 @@ async def generate_from_crawl_endpoint(request: Request, crawl_data: dict, forma
         # Save to Supabase — best-effort, never fails the request
         suite_id = None
         try:
-            suite_id = await asyncio.to_thread(save_suite, crawl_data, test_suite)
+            suite_id = await asyncio.to_thread(save_suite, crawl_data, test_suite, user_id)
         except Exception:
             logger.warning("Supabase save failed; continuing without persistence")
 

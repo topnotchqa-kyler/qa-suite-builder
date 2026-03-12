@@ -24,10 +24,16 @@ def _get_client() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 
-def save_suite(crawl_data: dict, test_suite: dict) -> str:
+def save_suite(
+    crawl_data: dict,
+    test_suite: dict,
+    user_id: Optional[str] = None,
+) -> str:
     """
     Persist a generated test suite alongside its crawl data.
     Returns the new row's UUID string.
+
+    user_id is optional — anonymous suites are saved with user_id=NULL.
     """
     client = _get_client()
     result = (
@@ -38,6 +44,7 @@ def save_suite(crawl_data: dict, test_suite: dict) -> str:
             "crawl_data":  crawl_data,
             "test_suite":  test_suite,
             "environment": SUPABASE_ENV,
+            "user_id":     user_id,   # NULL when anonymous — column accepts NULL
         })
         .execute()
     )
