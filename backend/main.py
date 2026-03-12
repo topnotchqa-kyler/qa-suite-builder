@@ -195,13 +195,22 @@ async def generate_endpoint(request: Request, body: GenerateRequest, format: Opt
 
 @app.post("/api/generate-from-crawl")
 @limiter.limit("10/hour")
-async def generate_from_crawl_endpoint(request: Request, crawl_data: dict):
+async def generate_from_crawl_endpoint(request: Request, crawl_data: dict, format: Optional[str] = None):
     """
-    Generate .xlsx from pre-existing crawl data (skip crawl step).
-    Useful for re-running generation without re-crawling.
+    Generate from pre-existing crawl data (skip crawl step).
+    Pass ?format=json to return the test suite as JSON instead of an .xlsx file.
     """
     try:
         test_suite = await asyncio.to_thread(generate_test_suite, crawl_data)
+
+        # JSON mode — return structured data for the inline viewer
+        if format == "json":
+            return JSONResponse(content={
+                "sections_generated": len(test_suite.get("sections", [])),
+                "test_suite": test_suite,
+            })
+
+        # Default — stream back as .xlsx file download
         xlsx_bytes = await asyncio.to_thread(build_workbook, test_suite)
 
         site_name = _sanitize_filename(

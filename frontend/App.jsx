@@ -2,124 +2,490 @@ import { useState, useRef } from "react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-// ── Status machine ────────────────────────────────────────────────────────
+// ── Step definitions ──────────────────────────────────────────────────────────
 const STEPS = [
-  { id: "crawl",    label: "Crawling pages",        icon: "🔍" },
-  { id: "analyze",  label: "Analyzing DOM & forms",  icon: "🧩" },
-  { id: "generate", label: "Generating test cases",  icon: "🤖" },
-  { id: "build",    label: "Building workbook",      icon: "📊" },
-  { id: "done",     label: "Ready to download",      icon: "✅" },
+  { id: "crawl",    label: "Crawl pages",        icon: "🔍" },
+  { id: "generate", label: "Generate test cases", icon: "🤖" },
+  { id: "done",     label: "Test suite ready",    icon: "✅" },
 ];
+
+// ── Priority / category badge palette ─────────────────────────────────────────
+const PRIORITY_STYLE = {
+  Critical: { background: "rgba(69,10,10,0.85)",  color: "#fca5a5", border: "1px solid rgba(127,29,29,0.7)" },
+  High:     { background: "rgba(67,20,7,0.85)",   color: "#fdba74", border: "1px solid rgba(124,45,18,0.7)" },
+  Medium:   { background: "rgba(66,32,6,0.85)",   color: "#fcd34d", border: "1px solid rgba(113,63,18,0.7)" },
+  Low:      { background: "rgba(30,41,59,0.85)",  color: "#94a3b8", border: "1px solid rgba(51,65,85,0.7)"  },
+};
+const CATEGORY_STYLE_BASE = { background: "rgba(15,34,49,0.85)", color: "#67e8f9", border: "1px solid rgba(22,78,99,0.7)" };
+
+// ── Small shared components ───────────────────────────────────────────────────
+
+function Badge({ children, extraStyle }) {
+  return (
+    <span style={{
+      display: "inline-block",
+      padding: "2px 7px",
+      borderRadius: 4,
+      fontSize: 10,
+      fontWeight: 600,
+      letterSpacing: "0.04em",
+      textTransform: "uppercase",
+      whiteSpace: "nowrap",
+      ...extraStyle,
+    }}>
+      {children}
+    </span>
+  );
+}
+
+function Spinner() {
+  return <span style={styles.spinner} aria-hidden="true" />;
+}
+
+function Stat({ label, value }) {
+  return (
+    <div style={styles.stat}>
+      <span style={styles.statValue}>{value}</span>
+      <span style={styles.statLabel}>{label}</span>
+    </div>
+  );
+}
+
+function DetailField({ label, value }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 13, color: "#B8B0CC", lineHeight: 1.55 }}>{value}</div>
+    </div>
+  );
+}
+
+// ── SiteArchitectureCard ──────────────────────────────────────────────────────
+
+function SiteArchitectureCard({ crawlData }) {
+  const arch = crawlData?.site_architecture;
+  const pagesCrawled = crawlData?.pages_crawled || 0;
+  const families = arch?.template_families || {};
+  const familyEntries = Object.entries(families).sort((a, b) => b[1] - a[1]);
+
+  return (
+    <div style={styles.archCard}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+        <span style={{ color: "#86EFAC", fontSize: 13 }}>✓</span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "#D0C0F0" }}>Crawl Complete</span>
+      </div>
+
+      <div style={{ display: "flex", gap: 28, flexWrap: "wrap", marginBottom: familyEntries.length ? 18 : 0 }}>
+        <Stat label="Pages crawled"  value={pagesCrawled} />
+        {arch ? (
+          <>
+            <Stat label="URLs in sitemap" value={arch.total_urls_in_sitemap?.toLocaleString() || "—"} />
+            <Stat label="Unique pages"    value={arch.unique_pages} />
+            <Stat label="Discovery"       value={arch.discovery_method === "sitemap" ? "sitemap.xml" : "link-following"} />
+          </>
+        ) : (
+          <Stat label="Discovery" value="link-following" />
+        )}
+      </div>
+
+      {familyEntries.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, color: "#555", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>
+            Template Families
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+            {familyEntries.map(([key, count]) => (
+              <div key={key} style={{
+                background: "rgba(124,58,237,0.1)",
+                border: "1px solid rgba(192,132,252,0.15)",
+                borderRadius: 6,
+                padding: "4px 10px",
+                fontSize: 12,
+                display: "flex",
+                alignItems: "center",
+                gap: 7,
+              }}>
+                <span style={{ color: "#9080BA" }}>{key}</span>
+                <span style={{ color: "#C084FC", fontWeight: 700 }}>{count.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── TestCaseRow ───────────────────────────────────────────────────────────────
+
+function TestCaseRow({ testCase, isLast }) {
+  const [expanded, setExpanded] = useState(false);
+  const steps = (testCase.steps || "").split("\n").filter(s => s.trim());
+  const priorityStyle = PRIORITY_STYLE[testCase.priority] || PRIORITY_STYLE.Low;
+
+  return (
+    <div style={{ borderBottom: isLast ? "none" : "1px solid rgba(255,255,255,0.03)" }}>
+      <button
+        onClick={() => setExpanded(v => !v)}
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "9px 20px 9px 34px",
+          background: expanded ? "rgba(255,255,255,0.03)" : "transparent",
+          border: "none",
+          cursor: "pointer",
+          textAlign: "left",
+          fontFamily: "inherit",
+          color: "inherit",
+          transition: "background 0.1s",
+        }}
+        aria-expanded={expanded}
+      >
+        <Badge extraStyle={priorityStyle}>{testCase.priority}</Badge>
+        <Badge extraStyle={CATEGORY_STYLE_BASE}>{testCase.category}</Badge>
+        <span style={{ fontSize: 11, color: "#555", fontFamily: "monospace", flexShrink: 0 }}>
+          {testCase.id}
+        </span>
+        <span style={{ flex: 1, fontSize: 13, color: "#C8C0D8", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {testCase.title}
+        </span>
+        <span style={{ color: "#444", fontSize: 9, flexShrink: 0, marginLeft: 4 }}>
+          {expanded ? "▲" : "▶"}
+        </span>
+      </button>
+
+      {expanded && (
+        <div style={{
+          padding: "6px 20px 16px 34px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          background: "rgba(255,255,255,0.015)",
+        }}>
+          {testCase.description && (
+            <DetailField label="Description" value={testCase.description} />
+          )}
+          {testCase.preconditions && (
+            <DetailField label="Preconditions" value={testCase.preconditions} />
+          )}
+          {steps.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                Steps
+              </div>
+              <ol style={{ margin: 0, paddingLeft: 20 }}>
+                {steps.map((step, i) => (
+                  <li key={i} style={{ fontSize: 13, color: "#B8B0CC", marginBottom: 4, lineHeight: 1.55 }}>
+                    {step.replace(/^\d+\.\s*/, "")}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {testCase.expected_result && (
+            <DetailField label="Expected Result" value={testCase.expected_result} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── SectionCard ───────────────────────────────────────────────────────────────
+
+function SectionCard({ section, defaultExpanded, isLast }) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const tests = section.test_cases || [];
+
+  return (
+    <div style={{ borderBottom: isLast ? "none" : "1px solid rgba(255,255,255,0.05)" }}>
+      <button
+        onClick={() => setExpanded(v => !v)}
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "13px 20px",
+          background: expanded ? "rgba(124,58,237,0.05)" : "rgba(255,255,255,0.01)",
+          border: "none",
+          cursor: "pointer",
+          textAlign: "left",
+          fontFamily: "inherit",
+          color: "inherit",
+          transition: "background 0.15s",
+        }}
+        aria-expanded={expanded}
+      >
+        <span style={{ color: "#7C3AED", fontSize: 9, flexShrink: 0, marginTop: 1 }}>
+          {expanded ? "▼" : "▶"}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#D0C0F0", marginBottom: 2 }}>
+            {section.name}
+          </div>
+          <div style={{ fontSize: 11, color: "#555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {section.source_url}
+          </div>
+        </div>
+        <span style={{
+          fontSize: 11,
+          color: "#7777AA",
+          background: "rgba(255,255,255,0.05)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: 5,
+          padding: "2px 9px",
+          flexShrink: 0,
+        }}>
+          {tests.length} test{tests.length !== 1 ? "s" : ""}
+        </span>
+      </button>
+
+      {expanded && tests.length > 0 && (
+        <div style={{ paddingBottom: 4 }}>
+          {tests.map((tc, i) => (
+            <TestCaseRow
+              key={tc.id || i}
+              testCase={tc}
+              isLast={i === tests.length - 1}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── TestSuiteViewer ───────────────────────────────────────────────────────────
+
+function TestSuiteViewer({ testSuite, crawlData, onDownloadXlsx, isDownloading }) {
+  const totalTests = (testSuite.sections || []).reduce((sum, s) => sum + (s.test_cases || []).length, 0);
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      {/* Header */}
+      <div style={{
+        background: "rgba(124,58,237,0.08)",
+        border: "1px solid rgba(192,132,252,0.2)",
+        borderRadius: "14px 14px 0 0",
+        padding: "20px 24px",
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "space-between",
+        gap: 16,
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h2 style={{ fontSize: 17, fontWeight: 700, color: "#E2C4FF", margin: "0 0 5px" }}>
+            {testSuite.site_name} — Test Suite
+          </h2>
+          <div style={{ fontSize: 12, color: "#7777AA", marginBottom: testSuite.summary ? 10 : 0 }}>
+            {crawlData?.pages_crawled} page{crawlData?.pages_crawled !== 1 ? "s" : ""} crawled
+            &nbsp;·&nbsp;{(testSuite.sections || []).length} sections
+            &nbsp;·&nbsp;{totalTests} test cases
+          </div>
+          {testSuite.summary && (
+            <p style={{ fontSize: 13, color: "#9090A8", margin: 0, lineHeight: 1.55, maxWidth: 560 }}>
+              {testSuite.summary}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={onDownloadXlsx}
+          disabled={isDownloading}
+          style={{
+            background: isDownloading ? "rgba(124,58,237,0.2)" : "linear-gradient(135deg,#7C3AED,#5B21B6)",
+            color: "#fff",
+            border: "none",
+            borderRadius: 9,
+            padding: "10px 18px",
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: isDownloading ? "not-allowed" : "pointer",
+            whiteSpace: "nowrap",
+            opacity: isDownloading ? 0.6 : 1,
+            fontFamily: "inherit",
+            flexShrink: 0,
+            transition: "opacity 0.15s",
+          }}
+        >
+          {isDownloading ? "Preparing…" : "⬇ Download .xlsx"}
+        </button>
+      </div>
+
+      {/* Sections */}
+      <div style={{
+        border: "1px solid rgba(192,132,252,0.2)",
+        borderTop: "none",
+        borderRadius: "0 0 14px 14px",
+        overflow: "hidden",
+      }}>
+        {(testSuite.sections || []).map((section, i) => (
+          <SectionCard
+            key={section.source_url || i}
+            section={section}
+            defaultExpanded={i === 0}
+            isLast={i === testSuite.sections.length - 1}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
 
 export default function App() {
   const [url, setUrl]           = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showAuth, setShowAuth] = useState(false);
-  const [phase, setPhase]       = useState("idle"); // idle | running | done | error
-  const [stepIdx, setStepIdx]   = useState(0);
+  const [phase, setPhase]       = useState("idle"); // idle|crawling|crawled|generating|done|error
   const [error, setError]       = useState("");
-  const [meta, setMeta]         = useState(null);   // { pages, sections, filename }
-  const [downloadUrl, setDownloadUrl] = useState(null);
+  const [submittedUrl, setSubmittedUrl] = useState(""); // URL shown during active phases
+  const [crawlData, setCrawlData]       = useState(null);
+  const [testSuiteData, setTestSuiteData] = useState(null);
+  const [isDownloading, setIsDownloading] = useState(false);
   const abortRef = useRef(null);
-  const progressCardRef = useRef(null);
 
-  const isRunning = phase === "running";
+  const isActive = phase === "crawling" || phase === "generating";
 
-  async function handleSubmit(e) {
+  // Derive step states from phase
+  const stepStates = [
+    // step 0: crawl
+    ["crawled", "generating", "done"].includes(phase) ? "done"
+      : phase === "crawling" ? "active"
+      : "pending",
+    // step 1: generate
+    phase === "done" ? "done"
+      : phase === "generating" ? "active"
+      : "pending",
+    // step 2: ready
+    phase === "done" ? "done" : "pending",
+  ];
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
+
+  async function handleCrawl(e) {
     e.preventDefault();
     if (!url.trim()) return;
 
-    setPhase("running");
-    setStepIdx(0);
+    const fullUrl = url.trim().match(/^https?:\/\//) ? url.trim() : `https://${url.trim()}`;
+    setSubmittedUrl(fullUrl);
+    setPhase("crawling");
+    setCrawlData(null);
+    setTestSuiteData(null);
     setError("");
-    setMeta(null);
-    setDownloadUrl(null);
 
-    // Move focus to progress card for screen readers
-    setTimeout(() => progressCardRef.current?.focus(), 50);
-
-    // Simulate incremental progress steps while the real request runs
-    const stepTimer = startStepTimer();
-
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
-
-      const fullUrl = url.trim().match(/^https?:\/\//) ? url.trim() : `https://${url.trim()}`;
-      const res = await fetch(`${API_BASE}/api/generate`, {
+      const res = await fetch(`${API_BASE}/api/crawl`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: ctrl.signal,
-        body: JSON.stringify({
-          url: fullUrl,
-          username: username || null,
-          password: password || null,
-        }),
+        body: JSON.stringify({ url: fullUrl, username: username || null, password: password || null }),
       });
-
-      clearInterval(stepTimer);
-
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail || `Server error ${res.status}`);
       }
-
-      // Extract metadata from response headers
-      const pages    = res.headers.get("X-Pages-Crawled") || "?";
-      const sections = res.headers.get("X-Sections-Generated") || "?";
-      const disp     = res.headers.get("Content-Disposition") || "";
-      const filename = disp.match(/filename="([^"]+)"/)?.[1] || "qa_suite.xlsx";
-
-      // Trigger browser download
-      const blob   = await res.blob();
-      const objUrl = URL.createObjectURL(blob);
-
-      setMeta({ pages, sections, filename });
-      setDownloadUrl(objUrl);
-      setStepIdx(STEPS.length - 1);
-      setPhase("done");
-
+      const data = await res.json();
+      if (!data.pages || data.pages.length === 0) {
+        throw new Error("No pages were crawled. Check the URL and try again.");
+      }
+      setCrawlData(data);
+      setPhase("crawled");
     } catch (err) {
-      clearInterval(stepTimer);
       if (err.name === "AbortError") return;
-      setError(err.message || "Unexpected error");
+      setError(err.message || "Crawl failed. Check the URL and try again.");
       setPhase("error");
     }
   }
 
-  function startStepTimer() {
-    // Advance through steps 0-3 automatically while waiting
-    const delays = [2000, 4000, 8000, 14000];
-    let i = 0;
-    return setInterval(() => {
-      if (i < delays.length - 1) {
-        i++;
-        setStepIdx(i);
+  async function handleGenerate() {
+    setPhase("generating");
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    try {
+      const res = await fetch(`${API_BASE}/api/generate-from-crawl?format=json`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: ctrl.signal,
+        body: JSON.stringify(crawlData),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `Server error ${res.status}`);
       }
-    }, delays[i] || 3000);
+      const data = await res.json();
+      setTestSuiteData(data.test_suite);
+      setPhase("done");
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      setError(err.message || "Generation failed. Please try again.");
+      setPhase("error");
+    }
+  }
+
+  async function handleDownloadXlsx() {
+    if (!crawlData || isDownloading) return;
+    setIsDownloading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/generate-from-crawl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(crawlData),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `Server error ${res.status}`);
+      }
+      const disp = res.headers.get("Content-Disposition") || "";
+      const filename = disp.match(/filename="([^"]+)"/)?.[1] || "qa_suite.xlsx";
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objUrl), 60000);
+    } catch (err) {
+      // Non-destructive: keep test suite visible, show a brief alert
+      alert(`Download failed: ${err.message}`);
+    } finally {
+      setIsDownloading(false);
+    }
   }
 
   function handleCancel() {
     abortRef.current?.abort();
     setPhase("idle");
-    setStepIdx(0);
   }
 
   function handleReset() {
-    if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+    abortRef.current?.abort();
     setPhase("idle");
-    setStepIdx(0);
-    setMeta(null);
-    setDownloadUrl(null);
+    setCrawlData(null);
+    setTestSuiteData(null);
     setError("");
+    setIsDownloading(false);
+    setSubmittedUrl("");
   }
+
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <div style={styles.root}>
       <div style={styles.bg} />
       <div style={styles.grain} />
 
+      {/* GitHub link */}
       <a
         href="https://github.com/topnotchqa-kyler/qa-suite-builder"
         target="_blank"
@@ -135,7 +501,7 @@ export default function App() {
       </a>
 
       <main style={styles.main}>
-        {/* ── Logo / heading ── */}
+        {/* Header */}
         <header style={styles.header}>
           <div style={styles.logo}>
             <svg width="42" height="42" viewBox="0 0 32 32" aria-hidden="true" style={styles.logoSvg}>
@@ -158,116 +524,115 @@ export default function App() {
           </p>
         </header>
 
-        {/* ── Form card ── */}
-        <div style={styles.card}>
-          <form onSubmit={handleSubmit} style={styles.form} aria-busy={isRunning}>
-            <div className="sg-url-row" style={styles.urlRow}>
-              <div style={styles.urlInputWrap}>
-                <span style={styles.urlPrefix}>https://</span>
-                <input
-                  type="text"
-                  value={url}
-                  onChange={e => setUrl(e.target.value)}
-                  placeholder="example.com"
-                  style={styles.urlInput}
-                  disabled={isRunning}
-                  autoFocus
-                  required
-                  aria-label="Website URL to crawl"
-                />
+        {/* ── Form card (idle + error) or URL strip (active/done) ── */}
+        {phase === "idle" || phase === "error" ? (
+          <div style={styles.card}>
+            <form onSubmit={handleCrawl} style={styles.form}>
+              <div className="sg-url-row" style={styles.urlRow}>
+                <div style={styles.urlInputWrap}>
+                  <span style={styles.urlPrefix}>https://</span>
+                  <input
+                    type="text"
+                    value={url}
+                    onChange={e => setUrl(e.target.value)}
+                    placeholder="example.com"
+                    style={styles.urlInput}
+                    autoFocus
+                    required
+                    aria-label="Website URL to crawl"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={!url.trim()}
+                  className="sg-gen-btn"
+                  style={{ ...styles.generateBtn, ...(!url.trim() ? styles.btnDisabled : {}) }}
+                >
+                  Crawl Site
+                </button>
               </div>
 
               <button
-                type="submit"
-                disabled={isRunning || !url.trim()}
-                className="sg-gen-btn"
-                style={{
-                  ...styles.generateBtn,
-                  ...(isRunning || !url.trim() ? styles.btnDisabled : {}),
-                }}
+                type="button"
+                onClick={() => setShowAuth(v => !v)}
+                style={styles.authToggle}
+                aria-expanded={showAuth}
               >
-                {isRunning ? "Running…" : "Generate Suite"}
+                {showAuth ? "▾" : "▸"} Auth credentials (optional)
               </button>
+
+              {showAuth && (
+                <div style={styles.authRow}>
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={e => setUsername(e.target.value)}
+                    placeholder="Username"
+                    style={styles.authInput}
+                    autoComplete="username"
+                    aria-label="Username"
+                  />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="Password"
+                    style={styles.authInput}
+                    autoComplete="current-password"
+                    aria-label="Password"
+                  />
+                </div>
+              )}
+            </form>
+          </div>
+        ) : (
+          /* Compact URL strip shown during active phases */
+          <div style={{ ...styles.card, padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+              <span style={{ fontSize: 11, color: "#666", flexShrink: 0 }}>
+                {phase === "crawling" ? "Crawling" : "Crawled"}
+              </span>
+              <span style={{ fontSize: 13, color: "#B0A0D0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {submittedUrl}
+              </span>
             </div>
-
-            {/* Auth toggle */}
-            <button
-              type="button"
-              onClick={() => setShowAuth(v => !v)}
-              style={styles.authToggle}
-              disabled={isRunning}
-              aria-expanded={showAuth}
-            >
-              {showAuth ? "▾" : "▸"} Auth credentials (optional)
-            </button>
-
-            {showAuth && (
-              <div style={styles.authRow}>
-                <input
-                  type="text"
-                  value={username}
-                  onChange={e => setUsername(e.target.value)}
-                  placeholder="Username"
-                  style={styles.authInput}
-                  disabled={isRunning}
-                  autoComplete="username"
-                  aria-label="HTTP basic auth username"
-                />
-                <input
-                  type="password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="Password"
-                  style={styles.authInput}
-                  disabled={isRunning}
-                  autoComplete="current-password"
-                  aria-label="HTTP basic auth password"
-                />
-              </div>
+            {!isActive && (
+              <button onClick={handleReset} style={styles.newBtn}>
+                Start over
+              </button>
             )}
-          </form>
-        </div>
+          </div>
+        )}
 
-        {/* ── Progress ── */}
-        {(isRunning || phase === "done") && (
-          <div
-            ref={progressCardRef}
-            style={styles.progressCard}
-            tabIndex={-1}
-            role="status"
-            aria-live="polite"
-            aria-label="Generation progress"
-          >
-            <ol style={{ ...styles.steps, listStyle: "none", padding: 0, margin: 0 }}>
+        {/* ── Step indicators ── */}
+        {phase !== "idle" && phase !== "error" && (
+          <div style={styles.progressCard} role="status" aria-live="polite">
+            <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 11 }}>
               {STEPS.map((step, i) => {
-                const isDone    = i < stepIdx || phase === "done";
-                const isActive  = i === stepIdx && isRunning;
-                const isPending = i > stepIdx;
-
+                const state = stepStates[i]; // "done" | "active" | "pending"
                 return (
                   <li key={step.id} style={styles.stepRow}>
                     <div style={{
                       ...styles.stepDot,
-                      ...(isDone  ? styles.stepDotDone    : {}),
-                      ...(isActive ? styles.stepDotActive : {}),
-                      ...(isPending ? styles.stepDotPending : {}),
+                      ...(state === "done"    ? styles.stepDotDone    : {}),
+                      ...(state === "active"  ? styles.stepDotActive  : {}),
+                      ...(state === "pending" ? styles.stepDotPending : {}),
                     }}>
-                      {isDone ? "✓" : step.icon}
+                      {state === "done" ? "✓" : step.icon}
                     </div>
                     <span style={{
                       ...styles.stepLabel,
-                      ...(isActive  ? { color: "#E2C4FF", fontWeight: 600 } : {}),
-                      ...(isPending ? { color: "#777" } : {}),
+                      ...(state === "active"  ? { color: "#E2C4FF", fontWeight: 600 } : {}),
+                      ...(state === "pending" ? { color: "#555" } : {}),
                     }}>
                       {step.label}
-                      {isActive && <Spinner />}
+                      {state === "active" && <Spinner />}
                     </span>
                   </li>
                 );
               })}
             </ol>
-
-            {isRunning && (
+            {isActive && (
               <button onClick={handleCancel} style={styles.cancelBtn}>
                 Cancel
               </button>
@@ -275,11 +640,11 @@ export default function App() {
           </div>
         )}
 
-        {/* ── Error ── */}
+        {/* ── Error card ── */}
         {phase === "error" && (
           <div style={styles.errorCard} role="alert" aria-live="assertive">
             <span style={styles.errorIcon}>⚠</span>
-            <div>
+            <div style={{ flex: 1 }}>
               <strong style={{ color: "#FF6B6B" }}>Something went wrong</strong>
               <p style={styles.errorText}>{error}</p>
             </div>
@@ -287,36 +652,52 @@ export default function App() {
           </div>
         )}
 
-        {/* ── Done / Download ── */}
-        {phase === "done" && meta && downloadUrl && (
-          <div style={styles.doneCard}>
-            <div style={styles.doneStats}>
-              <Stat label="Pages crawled"      value={meta.pages} />
-              <Stat label="Test sections"      value={meta.sections} />
-              <Stat label="Format"             value=".xlsx" />
-            </div>
+        {/* ── Architecture card (crawled → done) ── */}
+        {crawlData && ["crawled", "generating", "done"].includes(phase) && (
+          <SiteArchitectureCard crawlData={crawlData} />
+        )}
 
-            <a
-              href={downloadUrl}
-              download={meta.filename}
-              style={styles.downloadBtn}
+        {/* ── Generate button (crawled phase only) ── */}
+        {phase === "crawled" && (
+          <div style={{ marginBottom: 16, display: "flex", justifyContent: "center" }}>
+            <button
+              onClick={handleGenerate}
+              style={{
+                background: "linear-gradient(135deg, #7C3AED, #5B21B6)",
+                color: "#fff",
+                border: "none",
+                borderRadius: 10,
+                padding: "13px 36px",
+                fontSize: 15,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                letterSpacing: "0.01em",
+                boxShadow: "0 0 20px rgba(124,58,237,0.35)",
+              }}
             >
-              ⬇ Download {meta.filename}
-            </a>
-
-            <button onClick={handleReset} style={styles.newBtn}>
-              Generate another suite
+              Generate Test Suite →
             </button>
           </div>
         )}
 
-        {/* ── How it works ── */}
+        {/* ── Test suite viewer (done phase) ── */}
+        {phase === "done" && testSuiteData && (
+          <TestSuiteViewer
+            testSuite={testSuiteData}
+            crawlData={crawlData}
+            onDownloadXlsx={handleDownloadXlsx}
+            isDownloading={isDownloading}
+          />
+        )}
+
+        {/* ── How it works (idle only) ── */}
         {phase === "idle" && (
           <div className="sg-how-grid" style={styles.howItWorks}>
             {[
-              { icon: "🔍", title: "Deep Crawl",    desc: "Playwright maps every reachable page, capturing DOM structure, form fields, button labels, and API calls." },
-              { icon: "🤖", title: "AI Generation", desc: "Claude generates test cases grounded in the actual UI — real field names, real interactions, real edge cases." },
-              { icon: "📊", title: "Excel Output",  desc: "Formatted .xlsx with a Dashboard, per-section sheets, status dropdowns, priority tags, and color coding." },
+              { icon: "🔍", title: "Smart Discovery",  desc: "Reads sitemap.xml to get a complete URL inventory before crawling. Falls back to link-following for sites without a sitemap." },
+              { icon: "🤖", title: "AI Generation",    desc: "Claude generates test cases grounded in the actual UI — real field names, real interactions, template-aware for repeated page types." },
+              { icon: "📊", title: "Inline + Export",  desc: "Browse test cases right in the browser, then export to a formatted .xlsx with a Dashboard, status dropdowns, and color coding." },
             ].map(item => (
               <div key={item.title} style={styles.howCard}>
                 <div style={styles.howIcon}>{item.icon}</div>
@@ -328,14 +709,9 @@ export default function App() {
         )}
       </main>
 
-      {/* ── Footer ── */}
+      {/* Footer */}
       <footer style={styles.footer}>
-        <a
-          href="https://topnotchqa.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={styles.footerLink}
-        >
+        <a href="https://topnotchqa.com" target="_blank" rel="noopener noreferrer" style={styles.footerLink}>
           Need a human QA team? TopNotch QA offers professional testing services →
         </a>
         <p style={styles.footerCopy}>© {new Date().getFullYear()} SuiteGen</p>
@@ -344,20 +720,7 @@ export default function App() {
   );
 }
 
-function Stat({ label, value }) {
-  return (
-    <div style={styles.stat} aria-label={`${label}: ${value}`}>
-      <span style={styles.statValue}>{value}</span>
-      <span style={styles.statLabel}>{label}</span>
-    </div>
-  );
-}
-
-function Spinner() {
-  return <span style={styles.spinner} aria-hidden="true" />;
-}
-
-// ── Styles ─────────────────────────────────────────────────────────────────
+// ── Styles ────────────────────────────────────────────────────────────────────
 const styles = {
   root: {
     minHeight: "100vh",
@@ -401,7 +764,7 @@ const styles = {
   main: {
     position: "relative",
     zIndex: 1,
-    maxWidth: 760,
+    maxWidth: 880,
     margin: "0 auto",
     padding: "64px 24px 80px",
   },
@@ -434,7 +797,7 @@ const styles = {
     lineHeight: 1.6,
   },
 
-  // Card
+  // Form card
   card: {
     background: "rgba(255,255,255,0.04)",
     border: "1px solid rgba(255,255,255,0.08)",
@@ -515,10 +878,9 @@ const styles = {
     background: "rgba(255,255,255,0.03)",
     border: "1px solid rgba(255,255,255,0.07)",
     borderRadius: 14,
-    padding: "22px 28px",
+    padding: "20px 24px",
     marginBottom: 16,
   },
-  steps: { display: "flex", flexDirection: "column", gap: 12 },
   stepRow: { display: "flex", alignItems: "center", gap: 14 },
   stepDot: {
     width: 28,
@@ -573,6 +935,20 @@ const styles = {
     fontFamily: "inherit",
   },
 
+  // Architecture card
+  archCard: {
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid rgba(255,255,255,0.07)",
+    borderRadius: 14,
+    padding: "18px 24px",
+    marginBottom: 12,
+  },
+
+  // Stat (shared with architecture card and header)
+  stat: { display: "flex", flexDirection: "column", gap: 2 },
+  statValue: { fontSize: 18, fontWeight: 700, color: "#E2C4FF" },
+  statLabel: { fontSize: 11, color: "#666", textTransform: "uppercase", letterSpacing: "0.05em" },
+
   // Error
   errorCard: {
     display: "flex",
@@ -600,40 +976,15 @@ const styles = {
     alignSelf: "center",
   },
 
-  // Done
-  doneCard: {
-    background: "rgba(124,58,237,0.08)",
-    border: "1px solid rgba(192,132,252,0.25)",
-    borderRadius: 16,
-    padding: "24px 28px",
-    marginBottom: 16,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 20,
-  },
-  doneStats: { display: "flex", gap: 32 },
-  stat: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2 },
-  statValue: { fontSize: 24, fontWeight: 700, color: "#E2C4FF" },
-  statLabel: { fontSize: 11, color: "#999", textTransform: "uppercase", letterSpacing: "0.05em" },
-  downloadBtn: {
-    display: "inline-block",
-    background: "linear-gradient(135deg, #7C3AED, #5B21B6)",
-    color: "#fff",
-    borderRadius: 10,
-    padding: "12px 28px",
-    fontSize: 14,
-    fontWeight: 600,
-    textDecoration: "none",
-    letterSpacing: "0.01em",
-  },
+  // Shared buttons
   newBtn: {
     background: "none",
     border: "none",
-    color: "#999",
+    color: "#777",
     fontSize: 12,
     cursor: "pointer",
     fontFamily: "inherit",
+    flexShrink: 0,
   },
 
   // How it works
@@ -649,9 +1000,9 @@ const styles = {
     borderRadius: 12,
     padding: "20px 18px",
   },
-  howIcon: { fontSize: 22, marginBottom: 10 },
+  howIcon:  { fontSize: 22, marginBottom: 10 },
   howTitle: { fontSize: 13, fontWeight: 600, color: "#D0C0F0", margin: "0 0 6px" },
-  howDesc: { fontSize: 12, color: "#999", lineHeight: 1.6, margin: 0 },
+  howDesc:  { fontSize: 12, color: "#888", lineHeight: 1.6, margin: 0 },
 
   footer: {
     position: "relative",
@@ -663,8 +1014,7 @@ const styles = {
     fontSize: 12,
     color: "#666",
     textDecoration: "none",
-    borderBottom: "1px solid transparent",
-    transition: "color 0.15s, border-color 0.15s",
+    transition: "color 0.15s",
   },
   footerCopy: {
     fontSize: 11,
@@ -673,7 +1023,7 @@ const styles = {
   },
 };
 
-// Inject keyframes
+// ── Global styles injection ───────────────────────────────────────────────────
 const styleEl = document.createElement("style");
 styleEl.textContent = `
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&display=swap');
@@ -685,8 +1035,8 @@ styleEl.textContent = `
   }
   @media (max-width: 600px) {
     .sg-how-grid { grid-template-columns: 1fr !important; }
-    .sg-url-row { flex-direction: column !important; }
-    .sg-gen-btn { padding: 12px 24px !important; width: 100% !important; }
+    .sg-url-row  { flex-direction: column !important; }
+    .sg-gen-btn  { padding: 12px 24px !important; width: 100% !important; }
     .sg-github span { display: none !important; }
     .sg-github { padding: 6px 8px !important; gap: 0 !important; }
   }
