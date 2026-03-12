@@ -96,6 +96,7 @@ Environment variables required:
 | `PORT` | ✅ | Set to `8000` — Railway routes to this port |
 | `SUPABASE_URL` | ✅ | Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | ✅ | Supabase service role key (bypasses RLS) |
+| `SUPABASE_JWT_SECRET` | ✅ | Supabase JWT secret — verifies user tokens on generation endpoints (Project Settings → API → JWT Settings) |
 | `SUPABASE_ENV` | ✅ | `production` in Railway, `development` locally — stamps every saved row |
 | `ANTHROPIC_API_KEY` | Optional | Fallback API key for local dev. In production users supply their own key via the UI |
 
@@ -104,6 +105,8 @@ Environment variables required:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `VITE_API_URL` | ✅ | Backend URL, e.g. `https://your-service.railway.app` |
+| `VITE_SUPABASE_URL` | ✅ | Supabase project URL (Project Settings → API) |
+| `VITE_SUPABASE_ANON_KEY` | ✅ | Supabase **publishable/anon** key — not the service role key (Project Settings → API) |
 
 ### Supabase setup
 
@@ -117,14 +120,36 @@ create table test_suites (
   site_name    text not null default '',
   environment  text not null default 'production',
   crawl_data   jsonb not null,
-  test_suite   jsonb not null
+  test_suite   jsonb not null,
+  user_id      uuid references auth.users(id) on delete set null
 );
 
 create index on test_suites (created_at desc);
 create index on test_suites (environment);
+create index on test_suites (user_id) where user_id is not null;
 ```
 
-Use the **service role** key (not the anon key) so the backend can write without RLS getting in the way.
+Use the **service role** key (not the anon key) for the backend so it can write without RLS getting in the way.
+
+#### Auth providers
+
+In the Supabase dashboard under **Authentication → Providers**, enable:
+
+- **Email** — enabled by default; confirm the "Confirm email" setting matches your preference
+- **Google** — requires a Google Cloud OAuth Client ID + Secret ([Google Cloud Console](https://console.cloud.google.com))
+- **GitHub** — requires a GitHub **OAuth App** Client ID + Secret (`github.com/settings/developers` → OAuth Apps — note: GitHub Apps use a different mechanism and won't work here)
+
+For each OAuth provider, set the callback URL to:
+```
+https://<project-ref>.supabase.co/auth/v1/callback
+```
+
+Under **Authentication → URL Configuration**, add your allowed redirect URLs:
+```
+https://suitegen.dev
+https://qa-suite-builder.vercel.app
+http://localhost:3000
+```
 
 ---
 
@@ -168,7 +193,7 @@ cp .env.example .env.local
 
 # Start the dev server
 npm run dev
-# → Open http://localhost:5173
+# → Open http://localhost:3000
 ```
 
 ---
@@ -185,12 +210,14 @@ qa-suite-builder/
 │   ├── crawler.py           # Playwright crawl + sitemap discovery
 │   ├── generation.py        # Anthropic AI generation service
 │   ├── storage.py           # Supabase persistence (save / get / list suites)
+│   ├── auth.py              # FastAPI dependency — optional JWT verification (Supabase HS256)
 │   ├── xlsx_builder.py      # openpyxl workbook builder
 │   ├── Dockerfile           # Backend-only Dockerfile
 │   ├── requirements.txt
 │   └── .env.example
 └── frontend/
     ├── App.jsx              # Main React component (all UI + inline styles)
+    ├── supabase.js          # Supabase client (returns null if env vars missing)
     ├── main.jsx             # Entry point
     ├── index.html
     ├── package.json
@@ -263,6 +290,7 @@ The inline viewer includes a **Copy link** button for sharing. The `.xlsx` downl
 - **Rate limiting** — per-IP request limits enforced on all generation endpoints
 - **User-supplied API keys** — Anthropic API keys are entered by the user and sent only to the Anthropic API via the `X-Api-Key` header. Keys are never written to any storage — they live only in browser memory for the duration of the session
 - **No auth credentials stored** — `username`/`password` fields for protected sites are used only during the crawl and are never persisted
+- **JWT verification** — generation endpoints optionally accept a `Authorization: Bearer <token>` header; the backend verifies it against `SUPABASE_JWT_SECRET` (HS256) and stamps the resolved `user_id` on the saved suite. Auth is always optional — anonymous generation continues to work without a token
 
 ---
 
@@ -274,4 +302,5 @@ The inline viewer includes a **Copy link** button for sharing. The `.xlsx` downl
 - All crawl logic lives in `crawler.py`
 - All workbook formatting lives in `xlsx_builder.py`
 - All Supabase persistence lives in `storage.py` — storage failures are best-effort and never abort generation
+- Auth logic lives in `auth.py` — `get_optional_user_id` is a FastAPI `Depends` that returns a UUID string or `None`, never raises
 - Never hardcode API keys — use environment variables
