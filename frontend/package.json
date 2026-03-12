@@ -8,10 +8,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "@supabase/supabase-js": "^2.99.1",
     "@vercel/analytics": "^1.4.1",
-    "@vercel/speed-insights": "^1.1.0"
+    "@vercel/speed-insights": "^1.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",

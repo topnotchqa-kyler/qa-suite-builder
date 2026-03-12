@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { supabase } from "./supabase.js";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -356,9 +357,157 @@ function TestSuiteViewer({ testSuite, crawlData, onDownloadXlsx, isDownloading, 
   );
 }
 
+// ── Auth icon helpers ─────────────────────────────────────────────────────────
+
+function GoogleIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+    </svg>
+  );
+}
+
+function GitHubIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+      <path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.014-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836a9.59 9.59 0 0 1 2.504.337c1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z" />
+    </svg>
+  );
+}
+
+// ── Auth modal ────────────────────────────────────────────────────────────────
+
+function AuthModal({ mode, onModeChange, onClose, onSuccess }) {
+  const [email, setEmail]     = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState({ text: "", isError: false });
+  const [loading, setLoading] = useState(false);
+
+  async function handleEmailSubmit(e) {
+    e.preventDefault();
+    if (!supabase) return;
+    setMessage({ text: "", isError: false });
+    setLoading(true);
+    try {
+      if (mode === "signup") {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        setMessage({ text: "Check your email to confirm your account.", isError: false });
+        // Don't close — user must confirm email first
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        onSuccess();
+      }
+    } catch (err) {
+      setMessage({ text: err.message || "Authentication failed.", isError: true });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleOAuth(provider) {
+    if (!supabase) return;
+    setMessage({ text: "", isError: false });
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: { redirectTo: window.location.origin },
+      });
+      if (error) throw error;
+      // Browser navigates away — no further action needed
+    } catch (err) {
+      setMessage({ text: err.message || `${provider} sign-in failed.`, isError: true });
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={styles.modalPanel} onClick={e => e.stopPropagation()}>
+        {/* Tab switcher */}
+        <div style={styles.authTabs}>
+          {[["signin", "Sign in"], ["signup", "Sign up"]].map(([m, label]) => (
+            <button
+              key={m}
+              onClick={() => { onModeChange(m); setMessage({ text: "", isError: false }); }}
+              style={{ ...styles.authTab, ...(mode === m ? styles.authTabActive : {}) }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* OAuth buttons */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <button onClick={() => handleOAuth("google")} disabled={loading} style={styles.oauthBtn}>
+            <GoogleIcon /> Continue with Google
+          </button>
+          <button onClick={() => handleOAuth("github")} disabled={loading} style={styles.oauthBtn}>
+            <GitHubIcon /> Continue with GitHub
+          </button>
+        </div>
+
+        {/* Divider */}
+        <div style={styles.orDivider}>
+          <span style={styles.orDividerLine} />
+          <span style={styles.orDividerText}>or</span>
+          <span style={styles.orDividerLine} />
+        </div>
+
+        {/* Email / password form */}
+        <form onSubmit={handleEmailSubmit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <input
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="Email"
+            required
+            style={styles.authInput}
+            autoComplete="email"
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="Password"
+            required
+            style={styles.authInput}
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
+          />
+
+          {message.text && (
+            <p style={{ fontSize: 12, color: message.isError ? "#FF8080" : "#86EFAC", margin: 0, lineHeight: 1.5 }}>
+              {message.text}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{ ...styles.generateBtn, padding: "11px", opacity: loading ? 0.6 : 1, cursor: loading ? "not-allowed" : "pointer" }}
+          >
+            {loading ? "…" : mode === "signin" ? "Sign in" : "Create account"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 
 export default function App() {
+  // ── Auth state ──────────────────────────────────────────────────────────────
+  const [user, setUser]               = useState(null);   // Supabase User or null
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authMode, setAuthMode]       = useState("signin"); // "signin"|"signup"
+
+  // ── App state ───────────────────────────────────────────────────────────────
   const [url, setUrl]           = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -373,6 +522,26 @@ export default function App() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [linkCopied, setLinkCopied]       = useState(false);
   const abortRef = useRef(null);
+
+  // ── Supabase auth listener (runs before suite loader — order matters) ────────
+  useEffect(() => {
+    if (!supabase) return;
+
+    // Exchange PKCE code from OAuth redirect, then set user from session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      // Remove ?code= from the URL so it doesn't interfere with ?suite= logic
+      if (window.location.search.includes("code=")) {
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load shared suite from ?suite=<id> on first render ───────────────────
   useEffect(() => {
@@ -417,6 +586,13 @@ export default function App() {
   ];
 
   // ── Handlers ────────────────────────────────────────────────────────────────
+
+  // Returns { Authorization: "Bearer <token>" } when signed in, otherwise {}
+  async function getAuthHeaders() {
+    if (!supabase) return {};
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token ? { "Authorization": `Bearer ${session.access_token}` } : {};
+  }
 
   function handleCopyLink() {
     const url = `${window.location.origin}/?suite=${suiteId}`;
@@ -468,9 +644,14 @@ export default function App() {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {
+      const authHeaders = await getAuthHeaders();
       const res = await fetch(`${API_BASE}/api/generate-from-crawl?format=json`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...(apiKey ? { "X-Api-Key": apiKey } : {}) },
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { "X-Api-Key": apiKey } : {}),
+          ...authHeaders,
+        },
         signal: ctrl.signal,
         body: JSON.stringify(crawlData),
       });
@@ -497,11 +678,16 @@ export default function App() {
     setIsDownloading(true);
     try {
       // If we have a saved suite ID, download directly — no AI call needed
+      const authHeaders = await getAuthHeaders();
       const res = suiteId
         ? await fetch(`${API_BASE}/api/suites/${suiteId}/xlsx`)
         : await fetch(`${API_BASE}/api/generate-from-crawl`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", ...(apiKey ? { "X-Api-Key": apiKey } : {}) },
+            headers: {
+              "Content-Type": "application/json",
+              ...(apiKey ? { "X-Api-Key": apiKey } : {}),
+              ...authHeaders,
+            },
             body: JSON.stringify(crawlData),
           });
       if (!res.ok) {
@@ -566,6 +752,33 @@ export default function App() {
         </svg>
         <span>GitHub</span>
       </a>
+
+      {/* Auth: user pill (signed in) */}
+      {supabase && user && (
+        <div style={styles.userPill} className="sg-auth-btn">
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>
+            {user.email}
+          </span>
+          <button
+            onClick={() => supabase.auth.signOut()}
+            style={{ background: "none", border: "none", color: "#7C5EA0", fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0, marginLeft: 4, whiteSpace: "nowrap" }}
+          >
+            Sign out
+          </button>
+        </div>
+      )}
+
+      {/* Auth: sign-in button (signed out) */}
+      {supabase && !user && (
+        <button
+          className="sg-auth-btn"
+          onClick={() => { setShowAuthModal(true); setAuthMode("signin"); }}
+          style={styles.signInBtn}
+          aria-label="Sign in"
+        >
+          Sign in
+        </button>
+      )}
 
       <main style={styles.main}>
         {/* Header */}
@@ -822,6 +1035,16 @@ export default function App() {
         </a>
         <p style={styles.footerCopy}>© {new Date().getFullYear()} SuiteGen</p>
       </footer>
+
+      {/* Auth modal */}
+      {showAuthModal && supabase && (
+        <AuthModal
+          mode={authMode}
+          onModeChange={setAuthMode}
+          onClose={() => setShowAuthModal(false)}
+          onSuccess={() => setShowAuthModal(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1122,6 +1345,121 @@ const styles = {
   howTitle: { fontSize: 13, fontWeight: 600, color: "#D0C0F0", margin: "0 0 6px" },
   howDesc:  { fontSize: 12, color: "#888", lineHeight: 1.6, margin: 0 },
 
+  // Auth modal
+  modalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.7)",
+    backdropFilter: "blur(4px)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 50,
+  },
+  modalPanel: {
+    background: "#13111F",
+    border: "1px solid rgba(192,132,252,0.2)",
+    borderRadius: 18,
+    padding: "28px 24px",
+    maxWidth: 380,
+    width: "calc(100% - 48px)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
+  },
+  authTabs: {
+    display: "flex",
+    background: "rgba(255,255,255,0.05)",
+    borderRadius: 10,
+    padding: 3,
+    gap: 3,
+  },
+  authTab: {
+    flex: 1,
+    background: "none",
+    border: "none",
+    color: "#888",
+    fontSize: 13,
+    fontWeight: 600,
+    padding: "7px 12px",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    transition: "background 0.15s, color 0.15s",
+  },
+  authTabActive: {
+    background: "rgba(124,58,237,0.3)",
+    color: "#E2C4FF",
+  },
+  oauthBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 9,
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 9,
+    color: "#D0C0F0",
+    fontSize: 13,
+    fontWeight: 500,
+    padding: "10px 16px",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    transition: "background 0.15s",
+    width: "100%",
+  },
+  orDivider: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  },
+  orDividerLine: {
+    flex: 1,
+    height: 1,
+    background: "rgba(255,255,255,0.08)",
+    display: "block",
+  },
+  orDividerText: {
+    fontSize: 11,
+    color: "#555",
+    flexShrink: 0,
+  },
+
+  // Header auth controls
+  userPill: {
+    position: "fixed",
+    top: 16,
+    right: 108,
+    zIndex: 10,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 12,
+    color: "#B0A0D0",
+    padding: "6px 12px",
+    borderRadius: 8,
+    background: "rgba(124,58,237,0.1)",
+    border: "1px solid rgba(192,132,252,0.2)",
+  },
+  signInBtn: {
+    position: "fixed",
+    top: 16,
+    right: 108,
+    zIndex: 10,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    color: "#999",
+    fontSize: 13,
+    padding: "6px 12px",
+    borderRadius: 8,
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    transition: "color 0.15s, background 0.15s",
+  },
+
   footer: {
     position: "relative",
     zIndex: 1,
@@ -1157,6 +1495,7 @@ styleEl.textContent = `
     .sg-gen-btn  { padding: 12px 24px !important; width: 100% !important; }
     .sg-github span { display: none !important; }
     .sg-github { padding: 6px 8px !important; gap: 0 !important; }
+    .sg-auth-btn { right: 60px !important; }
   }
 `;
 document.head.appendChild(styleEl);
