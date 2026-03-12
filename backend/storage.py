@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+SUPABASE_ENV = os.getenv("SUPABASE_ENV", "development")
 
 
 def _get_client() -> Client:
@@ -32,10 +33,11 @@ def save_suite(crawl_data: dict, test_suite: dict) -> str:
     result = (
         client.table("test_suites")
         .insert({
-            "base_url":   crawl_data.get("base_url", ""),
-            "site_name":  test_suite.get("site_name", ""),
-            "crawl_data": crawl_data,
-            "test_suite": test_suite,
+            "base_url":    crawl_data.get("base_url", ""),
+            "site_name":   test_suite.get("site_name", ""),
+            "crawl_data":  crawl_data,
+            "test_suite":  test_suite,
+            "environment": SUPABASE_ENV,
         })
         .execute()
     )
