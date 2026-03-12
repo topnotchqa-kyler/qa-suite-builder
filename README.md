@@ -202,6 +202,7 @@ npm run dev
 
 ```
 qa-suite-builder/
+├── CLAUDE.md                # Persistent instructions for Claude Code (workflow, testing, conventions)
 ├── Dockerfile               # Root Dockerfile used by Railway
 ├── railway.json             # Railway deploy config
 ├── vercel.json              # Vercel build config
