@@ -343,6 +343,7 @@ export default function App() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showAuth, setShowAuth] = useState(false);
+  const [apiKey, setApiKey]     = useState(() => localStorage.getItem("sg_api_key") || "");
   const [phase, setPhase]       = useState("idle"); // idle|crawling|crawled|generating|done|error
   const [error, setError]       = useState("");
   const [submittedUrl, setSubmittedUrl] = useState(""); // URL shown during active phases
@@ -368,6 +369,11 @@ export default function App() {
   ];
 
   // ── Handlers ────────────────────────────────────────────────────────────────
+
+  function handleApiKeyChange(val) {
+    setApiKey(val);
+    localStorage.setItem("sg_api_key", val);
+  }
 
   async function handleCrawl(e) {
     e.preventDefault();
@@ -413,7 +419,7 @@ export default function App() {
     try {
       const res = await fetch(`${API_BASE}/api/generate-from-crawl?format=json`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(apiKey ? { "X-Api-Key": apiKey } : {}) },
         signal: ctrl.signal,
         body: JSON.stringify(crawlData),
       });
@@ -437,7 +443,7 @@ export default function App() {
     try {
       const res = await fetch(`${API_BASE}/api/generate-from-crawl`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(apiKey ? { "X-Api-Key": apiKey } : {}) },
         body: JSON.stringify(crawlData),
       });
       if (!res.ok) {
@@ -552,6 +558,30 @@ export default function App() {
                 </button>
               </div>
 
+              {/* API key row */}
+              <div style={styles.apiKeyRow}>
+                <div style={styles.urlInputWrap}>
+                  <span style={styles.urlPrefix}>API Key</span>
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={e => handleApiKeyChange(e.target.value)}
+                    placeholder="sk-ant-api03-…"
+                    style={styles.urlInput}
+                    autoComplete="off"
+                    aria-label="Anthropic API key"
+                  />
+                </div>
+                <a
+                  href="https://console.anthropic.com/settings/keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={styles.apiKeyLink}
+                >
+                  Get key ↗
+                </a>
+              </div>
+
               <button
                 type="button"
                 onClick={() => setShowAuth(v => !v)}
@@ -659,25 +689,37 @@ export default function App() {
 
         {/* ── Generate button (crawled phase only) ── */}
         {phase === "crawled" && (
-          <div style={{ marginBottom: 16, display: "flex", justifyContent: "center" }}>
+          <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
             <button
               onClick={handleGenerate}
+              disabled={!apiKey.trim()}
               style={{
-                background: "linear-gradient(135deg, #7C3AED, #5B21B6)",
+                background: apiKey.trim() ? "linear-gradient(135deg, #7C3AED, #5B21B6)" : "rgba(124,58,237,0.2)",
                 color: "#fff",
                 border: "none",
                 borderRadius: 10,
                 padding: "13px 36px",
                 fontSize: 15,
                 fontWeight: 600,
-                cursor: "pointer",
+                cursor: apiKey.trim() ? "pointer" : "not-allowed",
                 fontFamily: "inherit",
                 letterSpacing: "0.01em",
-                boxShadow: "0 0 20px rgba(124,58,237,0.35)",
+                boxShadow: apiKey.trim() ? "0 0 20px rgba(124,58,237,0.35)" : "none",
+                opacity: apiKey.trim() ? 1 : 0.6,
+                transition: "all 0.15s",
               }}
             >
               Generate Test Suite →
             </button>
+            {!apiKey.trim() && (
+              <p style={{ margin: 0, fontSize: 12, color: "#777" }}>
+                Enter your{" "}
+                <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" style={{ color: "#9070C0" }}>
+                  Anthropic API key
+                </a>
+                {" "}above to generate
+              </p>
+            )}
           </div>
         )}
 
@@ -850,6 +892,18 @@ const styles = {
     transition: "opacity 0.15s",
   },
   btnDisabled: { opacity: 0.4, cursor: "not-allowed" },
+  apiKeyRow: {
+    display: "flex",
+    gap: 10,
+    alignItems: "center",
+  },
+  apiKeyLink: {
+    fontSize: 12,
+    color: "#9070C0",
+    textDecoration: "none",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
   authToggle: {
     background: "none",
     border: "none",

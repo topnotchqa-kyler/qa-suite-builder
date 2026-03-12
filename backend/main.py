@@ -142,8 +142,10 @@ async def generate_endpoint(request: Request, body: GenerateRequest, format: Opt
     """
     Full pipeline: crawl → generate test cases → return .xlsx file.
     Pass ?format=json to skip the xlsx build and return the test suite as JSON instead.
+    Requires either X-Api-Key header (user-supplied) or ANTHROPIC_API_KEY env var.
     """
     _validate_url(body.url)
+    api_key = request.headers.get("x-api-key") or None
     try:
         # Step 1: Crawl
         crawl_data = await crawl_site(
@@ -156,7 +158,7 @@ async def generate_endpoint(request: Request, body: GenerateRequest, format: Opt
             raise HTTPException(status_code=422, detail="No pages were crawled. Check the URL and try again.")
 
         # Step 2: Generate test suite via Anthropic API
-        test_suite = await asyncio.to_thread(generate_test_suite, crawl_data)
+        test_suite = await asyncio.to_thread(generate_test_suite, crawl_data, api_key)
 
         # JSON preview — skip xlsx build, return structured data directly
         if format == "json":
@@ -188,6 +190,8 @@ async def generate_endpoint(request: Request, body: GenerateRequest, format: Opt
 
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         logger.exception("Pipeline error for URL: %s", body.url)
         raise HTTPException(status_code=500, detail="An error occurred generating the test suite. Please try again.")
@@ -199,9 +203,11 @@ async def generate_from_crawl_endpoint(request: Request, crawl_data: dict, forma
     """
     Generate from pre-existing crawl data (skip crawl step).
     Pass ?format=json to return the test suite as JSON instead of an .xlsx file.
+    Requires either X-Api-Key header (user-supplied) or ANTHROPIC_API_KEY env var.
     """
+    api_key = request.headers.get("x-api-key") or None
     try:
-        test_suite = await asyncio.to_thread(generate_test_suite, crawl_data)
+        test_suite = await asyncio.to_thread(generate_test_suite, crawl_data, api_key)
 
         # JSON mode — return structured data for the inline viewer
         if format == "json":
@@ -223,6 +229,8 @@ async def generate_from_crawl_endpoint(request: Request, crawl_data: dict, forma
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'}
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         logger.exception("Generate-from-crawl error")
         raise HTTPException(status_code=500, detail="An error occurred generating the test suite. Please try again.")
