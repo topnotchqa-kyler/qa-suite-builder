@@ -196,6 +196,20 @@ npm run dev
 # → Open http://localhost:3000
 ```
 
+### Testing
+
+```bash
+cd backend
+
+# Install test dependencies (not needed in production)
+pip install -r requirements-dev.txt
+
+# Run the full test suite
+pytest tests/ -v
+```
+
+Tests cover pure utility functions and security-critical logic (SSRF validation, JWT parsing). All external dependencies (Anthropic API, Supabase, Playwright) are mocked — no real network calls are made during testing.
+
 ---
 
 ## Project Structure
@@ -215,6 +229,8 @@ qa-suite-builder/
 │   ├── xlsx_builder.py      # openpyxl workbook builder
 │   ├── Dockerfile           # Backend-only Dockerfile
 │   ├── requirements.txt
+│   ├── requirements-dev.txt # Test dependencies (pytest — not installed in Railway)
+│   ├── tests/               # pytest unit tests
 │   └── .env.example
 └── frontend/
     ├── App.jsx              # Main React component (all UI + inline styles)
