@@ -937,6 +937,10 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/suites`, { headers: authHeaders });
       if (res.status === 401) { setDashboardError("Please sign in to view your dashboard."); return; }
       if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error("Unexpected response from server — is the backend running?");
+      }
       const data = await res.json();
       setDashboardSuites(data.suites || []);
     } catch (err) {
