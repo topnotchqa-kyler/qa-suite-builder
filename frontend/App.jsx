@@ -949,12 +949,14 @@ function SuiteExplorer({
       {/* Collapsible architecture info panel */}
       {infoOpen && (
         <div style={styles.archInfoPanel}>
-          {activeSuite.summary && (
-            <p style={{ fontSize: 13, color: "#9090A8", margin: "0 0 14px", lineHeight: 1.6 }}>
-              {activeSuite.summary}
-            </p>
-          )}
-          {crawlData && <SiteArchitectureCard crawlData={crawlData} />}
+          <div style={{ maxWidth: 720, padding: "14px 24px 16px" }}>
+            {activeSuite.summary && (
+              <p style={{ fontSize: 13, color: "#9090A8", margin: "0 0 14px", lineHeight: 1.6 }}>
+                {activeSuite.summary}
+              </p>
+            )}
+            {crawlData && <SiteArchitectureCard crawlData={crawlData} />}
+          </div>
         </div>
       )}
 
