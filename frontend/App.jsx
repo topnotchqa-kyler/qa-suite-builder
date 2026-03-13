@@ -234,6 +234,7 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
             onChange={e => onChange("title", e.target.value)}
             onClick={e => e.stopPropagation()}
             onKeyDown={e => e.stopPropagation()}
+            onKeyUp={e => e.stopPropagation()}
             style={styles.editInput}
             placeholder="Test case title"
           />
