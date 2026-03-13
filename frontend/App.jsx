@@ -135,10 +135,6 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
   const priorityStyle = PRIORITY_STYLE[testCase.priority] || PRIORITY_STYLE.Low;
 
   useEffect(() => {
-    if (editMode) setExpanded(true);
-  }, [editMode]);
-
-  useEffect(() => {
     return () => {
       clearTimeout(debounceRef.current);
       clearTimeout(errorTimerRef.current);
@@ -258,8 +254,6 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
         }}
         aria-expanded={expanded}
       >
-        <Badge extraStyle={priorityStyle}>{testCase.priority}</Badge>
-        <Badge extraStyle={CATEGORY_STYLE_BASE}>{testCase.category}</Badge>
         <span style={{ fontSize: 11, color: "#555", fontFamily: "monospace", flexShrink: 0 }}>
           {testCase.id}
         </span>
@@ -276,6 +270,8 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
             {testCase.title}
           </span>
         )}
+        <Badge extraStyle={priorityStyle}>{testCase.priority}</Badge>
+        <Badge extraStyle={CATEGORY_STYLE_BASE}>{testCase.category}</Badge>
         <span style={{ color: "#444", fontSize: 9, flexShrink: 0, marginLeft: 4 }}>
           {expanded ? "▲" : "▶"}
         </span>
@@ -625,6 +621,421 @@ function TestSuiteViewer({
   );
 }
 
+// ── SuiteExplorer (two-panel master-detail) ───────────────────────────────────
+
+function SectionNavItem({ section, isSelected, onClick }) {
+  const tests = section.test_cases || [];
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        ...styles.navItem,
+        ...(isSelected ? styles.navItemSelected : {}),
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6 }}>
+        <div style={styles.navItemName}>{section.name}</div>
+        <span style={styles.navItemCount}>{tests.length}</span>
+      </div>
+      <div style={styles.navItemUrl}>{section.source_url}</div>
+    </button>
+  );
+}
+
+function SectionNav({ sections, selectedIdx, onSelect, search, onSearch }) {
+  return (
+    <div style={styles.sectionNav}>
+      <div style={styles.navSearchRow}>
+        <input
+          placeholder="Filter sections…"
+          value={search}
+          onChange={e => onSearch(e.target.value)}
+          style={styles.navSearch}
+        />
+      </div>
+      <div style={styles.navList}>
+        {sections.map((sec, i) => (
+          <SectionNavItem
+            key={sec.source_url || i}
+            section={sec}
+            isSelected={selectedIdx === i}
+            onClick={() => onSelect(i)}
+          />
+        ))}
+        {sections.length === 0 && (
+          <div style={styles.navEmpty}>No sections match</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const PRIORITY_ORDER = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+const SORT_COLS = [["id", "TC ID"], ["alpha", "A–Z"], ["priority", "Priority"], ["category", "Category"]];
+
+function SectionPanel({ section, sectionIdx, editMode, onTestCaseChange, apiKey }) {
+  const [sortBy, setSortBy]               = useState("id");
+  const [sortDir, setSortDir]             = useState("asc");
+  const [filterPriority, setFilterPriority] = useState("");
+  const [filterCategory, setFilterCategory] = useState("");
+
+  if (!section) {
+    return <div style={styles.panelEmpty}>← Select a section from the left panel</div>;
+  }
+
+  const tests = section.test_cases || [];
+
+  // Filter
+  const filtered = tests.filter(tc => {
+    if (filterPriority && tc.priority !== filterPriority) return false;
+    if (filterCategory && !tc.category?.toLowerCase().includes(filterCategory.toLowerCase())) return false;
+    return true;
+  });
+
+  // Sort (preserve original index for edit-mode writes)
+  const sorted = filtered
+    .map((tc, _) => ({ tc, origIdx: tests.indexOf(tc) }))
+    .sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === "id") {
+        const n = s => parseInt((s.tc.id || "").replace(/\D/g, "") || "0");
+        cmp = n(a) - n(b);
+      } else if (sortBy === "alpha") {
+        cmp = (a.tc.title || "").localeCompare(b.tc.title || "");
+      } else if (sortBy === "priority") {
+        cmp = (PRIORITY_ORDER[a.tc.priority] ?? 99) - (PRIORITY_ORDER[b.tc.priority] ?? 99);
+      } else if (sortBy === "category") {
+        cmp = (a.tc.category || "").localeCompare(b.tc.category || "");
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+
+  function handleSortClick(col) {
+    if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortBy(col); setSortDir("asc"); }
+  }
+
+  const hasFilters = filterPriority || filterCategory;
+
+  return (
+    <div style={styles.sectionPanel}>
+      {/* Panel header */}
+      <div style={styles.panelHeader}>
+        <div style={{ minWidth: 0 }}>
+          <div style={styles.panelSectionName}>{section.name}</div>
+          <div style={styles.panelSourceUrl}>{section.source_url}</div>
+        </div>
+        <span style={styles.panelTestCount}>{tests.length} test{tests.length !== 1 ? "s" : ""}</span>
+      </div>
+
+      {/* Sort + filter controls */}
+      <div style={styles.panelControls}>
+        <div style={styles.panelSortRow}>
+          {SORT_COLS.map(([col, label]) => (
+            <button
+              key={col}
+              onClick={() => handleSortClick(col)}
+              style={{ ...styles.sortBtn, ...(sortBy === col ? styles.sortBtnActive : {}) }}
+            >
+              {label}
+              {sortBy === col && <span style={{ marginLeft: 3, fontSize: 9, opacity: 0.8 }}>{sortDir === "asc" ? "↑" : "↓"}</span>}
+            </button>
+          ))}
+        </div>
+        <div style={styles.panelFilterRow}>
+          <select
+            value={filterPriority}
+            onChange={e => setFilterPriority(e.target.value)}
+            style={styles.filterSelect}
+          >
+            <option value="">All priorities</option>
+            {["Critical", "High", "Medium", "Low"].map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <input
+            placeholder="Filter category…"
+            value={filterCategory}
+            onChange={e => setFilterCategory(e.target.value)}
+            style={styles.filterInput}
+          />
+          {hasFilters && (
+            <button
+              onClick={() => { setFilterPriority(""); setFilterCategory(""); }}
+              style={styles.clearFiltersBtn}
+              title="Clear filters"
+            >✕</button>
+          )}
+        </div>
+      </div>
+
+      {/* Test case list */}
+      <div style={styles.panelCases}>
+        {sorted.map(({ tc, origIdx }, i) => (
+          <TestCaseRow
+            key={tc.id || origIdx}
+            testCase={tc}
+            isLast={i === sorted.length - 1}
+            sectionIdx={sectionIdx}
+            testCaseIdx={origIdx}
+            editMode={editMode}
+            onTestCaseChange={onTestCaseChange}
+            apiKey={apiKey}
+          />
+        ))}
+        {sorted.length === 0 && (
+          <div style={styles.panelEmpty}>No test cases match the current filters.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SuiteExplorer({
+  testSuite, crawlData,
+  onDownloadXlsx, isDownloading, suiteId, onCopyLink, linkCopied,
+  canEdit, editMode, editedSuite, isSaving, saveError,
+  onEnterEdit, onCancelEdit, onSaveEdit, onTestCaseChange,
+  snapshotInfo, onRestoreSnapshot, isRestoring,
+  apiKey, onApiKeyChange,
+  submittedUrl, onReset,
+}) {
+  const activeSuite = editMode ? editedSuite : testSuite;
+  const sections = activeSuite?.sections || [];
+  const totalTests = sections.reduce((s, sec) => s + (sec.test_cases || []).length, 0);
+
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [search, setSearch] = useState("");
+  const [infoOpen, setInfoOpen] = useState(false);
+
+  // Filter sections by name or URL
+  const filteredSections = search.trim()
+    ? sections.filter(s =>
+        s.name?.toLowerCase().includes(search.toLowerCase()) ||
+        s.source_url?.toLowerCase().includes(search.toLowerCase())
+      )
+    : sections;
+
+  // Map filtered position back to original index for correct test case loading
+  function handleSelectFiltered(filteredPos) {
+    const sec = filteredSections[filteredPos];
+    const origIdx = sections.indexOf(sec);
+    setSelectedIdx(origIdx >= 0 ? origIdx : 0);
+  }
+
+  // Find filtered position of selected section (for highlight)
+  const selectedFilteredIdx = filteredSections.indexOf(sections[selectedIdx]);
+  const selectedSection = sections[selectedIdx] ?? null;
+
+  return (
+    <div style={styles.explorer}>
+      {/* Explorer header */}
+      <div style={styles.explorerHeader}>
+        <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+          <h2 style={styles.explorerTitle}>
+            {activeSuite.site_name} — Test Suite
+          </h2>
+          <div style={styles.explorerMeta}>
+            {crawlData?.pages_crawled ?? 0} pages
+            &nbsp;·&nbsp;{sections.length} sections
+            &nbsp;·&nbsp;{totalTests} tests
+            {onReset && (
+              <>&nbsp;·&nbsp;<button onClick={onReset} style={styles.startOverBtn}>Start over</button></>
+            )}
+          </div>
+        </div>
+        <div style={styles.explorerActions}>
+          <button
+            onClick={() => setInfoOpen(v => !v)}
+            style={{
+              ...styles.infoToggleBtn,
+              ...(infoOpen ? { background: "rgba(124,58,237,0.15)", color: "#C084FC", border: "1px solid rgba(192,132,252,0.3)" } : {}),
+            }}
+            title="Toggle site architecture info"
+          >
+            ℹ {infoOpen ? "Hide info" : "Site info"}
+          </button>
+          {canEdit && !editMode && (
+            <button onClick={onEnterEdit} style={styles.editBtn}>✏ Edit</button>
+          )}
+          {editMode && (
+            <>
+              <button
+                onClick={onSaveEdit}
+                disabled={isSaving}
+                style={{ ...styles.saveBtn, opacity: isSaving ? 0.6 : 1, cursor: isSaving ? "not-allowed" : "pointer" }}
+              >
+                {isSaving ? "Saving…" : "Save changes"}
+              </button>
+              <button onClick={onCancelEdit} disabled={isSaving} style={styles.cancelEditBtn}>
+                Cancel
+              </button>
+            </>
+          )}
+          {!editMode && !snapshotInfo && (
+            <>
+              <button
+                onClick={onDownloadXlsx}
+                disabled={isDownloading}
+                style={{
+                  background: isDownloading ? "rgba(124,58,237,0.2)" : "linear-gradient(135deg,#7C3AED,#5B21B6)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 9,
+                  padding: "8px 16px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: isDownloading ? "not-allowed" : "pointer",
+                  whiteSpace: "nowrap",
+                  opacity: isDownloading ? 0.6 : 1,
+                  fontFamily: "inherit",
+                  transition: "opacity 0.15s",
+                }}
+              >
+                {isDownloading ? "Preparing…" : "⬇ Download .xlsx"}
+              </button>
+              {suiteId && (
+                <button
+                  onClick={onCopyLink}
+                  style={{
+                    background: "none",
+                    border: "1px solid rgba(192,132,252,0.25)",
+                    borderRadius: 7,
+                    padding: "6px 12px",
+                    fontSize: 11,
+                    color: linkCopied ? "#86EFAC" : "#9070C0",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    whiteSpace: "nowrap",
+                    transition: "color 0.15s",
+                  }}
+                >
+                  {linkCopied ? "✓ Link copied" : "🔗 Copy link"}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Edit mode: save error + AI key row */}
+      {editMode && (
+        <div style={{
+          padding: "8px 24px",
+          borderBottom: "1px solid rgba(192,132,252,0.1)",
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+          flexWrap: "wrap",
+          flexShrink: 0,
+          background: "rgba(124,58,237,0.04)",
+        }}>
+          {saveError && (
+            <p style={{ fontSize: 11, color: "#FF8080", margin: 0 }}>{saveError}</p>
+          )}
+          <div style={styles.inlineApiKeyRow}>
+            <span style={styles.inlineApiKeyLabel}>✦ AI key</span>
+            <input
+              type="password"
+              placeholder="sk-ant-… (for AI suggestions)"
+              value={apiKey}
+              onChange={e => onApiKeyChange?.(e.target.value)}
+              style={styles.inlineApiKeyInput}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Collapsible architecture info panel */}
+      {infoOpen && (
+        <div style={styles.archInfoPanel}>
+          <div style={{ padding: "14px 24px 0" }}>
+            {/* Row 1: site summary (left) + sitemap placeholder (right) */}
+            <div style={{ display: "flex", gap: 24, alignItems: "stretch", marginBottom: 16 }}>
+              {/* Left: descriptive site summary */}
+              <p style={{ flex: 1, fontSize: 13, color: "#9090A8", margin: 0, lineHeight: 1.6 }}>
+                {activeSuite.summary || ""}
+              </p>
+              {/* Right: sitemap diagram placeholder */}
+              <div style={{
+                flex: 1,
+                minHeight: 80,
+                border: "1px dashed rgba(255,255,255,0.07)",
+                borderRadius: 10,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                color: "#333",
+                userSelect: "none",
+              }}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="3" y="3" width="5" height="4" rx="1" />
+                  <rect x="10" y="3" width="5" height="4" rx="1" />
+                  <rect x="17" y="3" width="4" height="4" rx="1" />
+                  <rect x="8" y="11" width="5" height="4" rx="1" />
+                  <rect x="8" y="19" width="5" height="4" rx="1" />
+                  <line x1="5.5" y1="7" x2="5.5" y2="9.5" />
+                  <line x1="5.5" y1="9.5" x2="10.5" y2="9.5" />
+                  <line x1="10.5" y1="9.5" x2="10.5" y2="11" />
+                  <line x1="12.5" y1="7" x2="12.5" y2="11" />
+                  <line x1="19" y1="7" x2="19" y2="9.5" />
+                  <line x1="19" y1="9.5" x2="13" y2="9.5" />
+                  <line x1="10.5" y1="15" x2="10.5" y2="19" />
+                </svg>
+                <span style={{ fontSize: 11, letterSpacing: "0.04em" }}>Visual sitemap coming soon</span>
+              </div>
+            </div>
+            {/* Row 2: crawl stats — hug content width */}
+            {crawlData && (
+              <div style={{ width: "fit-content" }}>
+                <SiteArchitectureCard crawlData={crawlData} />
+              </div>
+            )}
+          </div>
+          <div style={{ height: 16 }} />
+        </div>
+      )}
+
+      {/* Snapshot banner */}
+      {snapshotInfo && (
+        <div style={styles.snapshotBanner}>
+          <span>
+            ⏪ Viewing <strong>Version {snapshotInfo.versionNumber}</strong> of {snapshotInfo.siteName} — historical snapshot
+          </span>
+          <button
+            onClick={onRestoreSnapshot}
+            disabled={isRestoring}
+            style={{ ...styles.restoreBtn, opacity: isRestoring ? 0.6 : 1, cursor: isRestoring ? "not-allowed" : "pointer" }}
+          >
+            {isRestoring ? "Restoring…" : "Restore this version →"}
+          </button>
+        </div>
+      )}
+
+      {/* Two-panel body */}
+      <div style={styles.explorerBody}>
+        <SectionNav
+          sections={filteredSections}
+          selectedIdx={selectedFilteredIdx}
+          onSelect={handleSelectFiltered}
+          search={search}
+          onSearch={setSearch}
+        />
+        <SectionPanel
+          key={selectedSection?.source_url || selectedIdx}
+          section={selectedSection}
+          sectionIdx={selectedIdx}
+          editMode={editMode}
+          onTestCaseChange={onTestCaseChange}
+          apiKey={apiKey}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 function Dashboard({
@@ -944,8 +1355,26 @@ export default function App() {
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
+      if (event === "SIGNED_OUT") {
+        setPhase("idle");
+        setCrawlData(null);
+        setTestSuiteData(null);
+        setSuiteId(null);
+        setSuiteOwnerId(null);
+        setError("");
+        setSubmittedUrl("");
+        setEditMode(false);
+        setEditedSuite(null);
+        setSaveError("");
+        setViewingSnapshot(null);
+        setIsRestoring(false);
+        setIsDownloading(false);
+        setLinkCopied(false);
+        setCurrentPage("home");
+        window.history.replaceState({}, "", "/");
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -1168,8 +1597,8 @@ export default function App() {
       setCurrentPage("dashboard");
       if (phase !== "idle") handleReset();
     } else {
-      window.history.pushState({}, "", "/");
       setCurrentPage("home");
+      if (phase !== "idle") handleReset();
     }
   }
 
@@ -1379,50 +1808,53 @@ export default function App() {
       <div style={styles.bg} />
       <div style={styles.grain} />
 
-      {/* Fixed header controls — single flex row so widths never overlap */}
-      <div style={styles.headerControls}>
-        {supabase && user && (
-          <button onClick={() => navigateTo("dashboard")} style={styles.mySuitesBtn}>
-            My Suites
-          </button>
-        )}
-
-        {supabase && user ? (
-          <div style={styles.userPill}>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>
-              {user.email}
-            </span>
-            <button
-              onClick={() => supabase.auth.signOut()}
-              style={{ background: "none", border: "none", color: "#7C5EA0", fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0, marginLeft: 4, whiteSpace: "nowrap" }}
-            >
-              Sign out
-            </button>
-          </div>
-        ) : supabase && (
-          <button
-            onClick={() => { setShowAuthModal(true); setAuthMode("signin"); }}
-            style={styles.signInBtn}
-            aria-label="Sign in"
-          >
-            Sign in
-          </button>
-        )}
-
-        <a
-          href="https://github.com/topnotchqa-kyler/qa-suite-builder"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={styles.githubLink}
-          className="sg-github"
-          aria-label="View source on GitHub"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
-            <path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.014-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836a9.59 9.59 0 0 1 2.504.337c1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z" />
+      {/* App nav — always visible, logo left + auth controls right */}
+      <nav style={styles.appNav}>
+        <button onClick={() => navigateTo("home")} style={styles.navLogoBrand} aria-label="SuiteGen home">
+          <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true" style={{ filter: "drop-shadow(0 0 6px rgba(124,58,237,0.5))", flexShrink: 0 }}>
+            <defs>
+              <linearGradient id="lgnav" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#9333EA" />
+                <stop offset="100%" stopColor="#6D28D9" />
+              </linearGradient>
+            </defs>
+            <rect width="32" height="32" rx="8" fill="url(#lgnav)" />
+            <path d="M8 16.5l5 5 11-11" stroke="#fff" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
           </svg>
-          <span>GitHub</span>
-        </a>
-      </div>
+          <span style={styles.navLogoText}>
+            <span style={{ color: "#F0E6FF" }}>Suite</span><span style={{ color: "#C084FC" }}>Gen</span>
+          </span>
+        </button>
+
+        <div style={styles.navControls}>
+          {supabase && user && (
+            <button onClick={() => navigateTo("dashboard")} style={styles.mySuitesBtn}>
+              My Suites
+            </button>
+          )}
+          {supabase && user ? (
+            <div style={styles.userPill}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>
+                {user.email}
+              </span>
+              <button
+                onClick={() => supabase.auth.signOut()}
+                style={{ background: "none", border: "none", color: "#7C5EA0", fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0, marginLeft: 4, whiteSpace: "nowrap" }}
+              >
+                Sign out
+              </button>
+            </div>
+          ) : supabase && (
+            <button
+              onClick={() => { setShowAuthModal(true); setAuthMode("signin"); }}
+              style={styles.signInBtn}
+              aria-label="Sign in"
+            >
+              Sign in
+            </button>
+          )}
+        </div>
+      </nav>
 
       {currentPage === "dashboard" ? (
         <Dashboard
@@ -1442,9 +1874,9 @@ export default function App() {
         />
       ) : (
 
-      <main style={styles.main}>
+      <main style={phase === "done" ? styles.mainExplorer : styles.main}>
         {/* Header */}
-        <header style={styles.header}>
+        {phase !== "done" && (<header style={styles.header}>
           <div style={styles.logo}>
             <svg width="42" height="42" viewBox="0 0 32 32" aria-hidden="true" style={styles.logoSvg}>
               <defs>
@@ -1465,6 +1897,7 @@ export default function App() {
             AI-assisted QA test suite generation for any website — crawl the UI, get structured, downloadable test cases in minutes.
           </p>
         </header>
+        )}
 
         {/* ── Form card (idle + error) or URL strip (active/done) ── */}
         {phase === "idle" || phase === "error" ? (
@@ -1551,8 +1984,8 @@ export default function App() {
               )}
             </form>
           </div>
-        ) : (
-          /* Compact URL strip shown during active phases */
+        ) : phase !== "done" ? (
+          /* Compact URL strip shown during active phases (hidden in done — folded into ExplorerHeader) */
           <div style={{ ...styles.card, padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
               <span style={{ fontSize: 11, color: "#666", flexShrink: 0 }}>
@@ -1568,10 +2001,10 @@ export default function App() {
               </button>
             )}
           </div>
-        )}
+        ) : null}
 
         {/* ── Step indicators ── */}
-        {phase !== "idle" && phase !== "error" && (
+        {phase !== "idle" && phase !== "error" && phase !== "done" && (
           <div style={styles.progressCard} role="status" aria-live="polite">
             <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 11 }}>
               {STEPS.map((step, i) => {
@@ -1619,7 +2052,7 @@ export default function App() {
         )}
 
         {/* ── Architecture card (crawled → done) ── */}
-        {crawlData && ["crawled", "generating", "done"].includes(phase) && (
+        {crawlData && ["crawled", "generating"].includes(phase) && (
           <SiteArchitectureCard crawlData={crawlData} />
         )}
 
@@ -1659,9 +2092,9 @@ export default function App() {
           </div>
         )}
 
-        {/* ── Test suite viewer (done phase) ── */}
+        {/* ── Suite explorer — two-panel master-detail (done phase) ── */}
         {phase === "done" && testSuiteData && (
-          <TestSuiteViewer
+          <SuiteExplorer
             testSuite={testSuiteData}
             crawlData={crawlData}
             onDownloadXlsx={handleDownloadXlsx}
@@ -1683,6 +2116,8 @@ export default function App() {
             isRestoring={isRestoring}
             apiKey={apiKey}
             onApiKeyChange={setApiKey}
+            submittedUrl={submittedUrl}
+            onReset={handleReset}
           />
         )}
 
@@ -1735,7 +2170,7 @@ const styles = {
     fontFamily: "'DM Sans', 'Segoe UI', sans-serif",
     color: "#E8E8F0",
     position: "relative",
-    overflow: "hidden",
+    overflowX: "hidden",
   },
   bg: {
     position: "fixed",
@@ -1751,34 +2186,46 @@ const styles = {
     pointerEvents: "none",
     zIndex: 0,
   },
-  headerControls: {
-    position: "fixed",
-    top: 16,
-    right: 20,
+  appNav: {
+    position: "sticky",
+    top: 0,
     zIndex: 10,
+    height: 56,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "0 20px",
+    background: "rgba(12,12,20,0.9)",
+    backdropFilter: "blur(12px)",
+    borderBottom: "1px solid rgba(255,255,255,0.06)",
+    flexShrink: 0,
+  },
+  navLogoBrand: {
     display: "flex",
     alignItems: "center",
     gap: 8,
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    padding: 0,
+    fontFamily: "inherit",
   },
-  githubLink: {
+  navLogoText: {
+    fontSize: 18,
+    fontWeight: 700,
+    letterSpacing: "-0.4px",
+  },
+  navControls: {
     display: "flex",
     alignItems: "center",
-    gap: 6,
-    color: "#999",
-    fontSize: 13,
-    textDecoration: "none",
-    padding: "6px 12px",
-    borderRadius: 8,
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.08)",
-    transition: "color 0.15s, background 0.15s",
+    gap: 8,
   },
   main: {
     position: "relative",
     zIndex: 1,
     maxWidth: 880,
     margin: "0 auto",
-    padding: "64px 24px 80px",
+    padding: "40px 24px 80px",
   },
   header: {
     textAlign: "center",
@@ -2108,7 +2555,7 @@ const styles = {
     flexShrink: 0,
   },
 
-  // Header auth controls (position managed by headerControls flex container)
+  // Nav auth controls
   userPill: {
     display: "flex",
     alignItems: "center",
@@ -2155,7 +2602,7 @@ const styles = {
     margin: "8px 0 0",
   },
 
-  // My Suites button (position managed by headerControls flex container)
+  // My Suites button (in app nav)
   mySuitesBtn: {
     display: "flex",
     alignItems: "center",
@@ -2246,6 +2693,290 @@ const styles = {
     fontSize: 13,
     fontFamily: "inherit",
     outline: "none",
+  },
+
+  // Suite Explorer (two-panel master-detail)
+  mainExplorer: {
+    position: "relative",
+    zIndex: 1,
+    maxWidth: "100%",
+    margin: 0,
+    padding: 0,
+    height: "calc(100vh - 56px)",
+    overflow: "hidden",
+  },
+  explorer: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+  },
+  explorerHeader: {
+    background: "rgba(124,58,237,0.08)",
+    borderBottom: "1px solid rgba(192,132,252,0.15)",
+    padding: "14px 24px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    flexShrink: 0,
+  },
+  explorerTitle: {
+    fontSize: 17,
+    fontWeight: 700,
+    color: "#E2C4FF",
+    margin: "0 0 3px",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  explorerMeta: {
+    fontSize: 12,
+    color: "#7777AA",
+    lineHeight: 1.5,
+  },
+  explorerActions: {
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+    flexShrink: 0,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+  },
+  infoToggleBtn: {
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 7,
+    color: "#9080BA",
+    fontSize: 12,
+    padding: "5px 10px",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    whiteSpace: "nowrap",
+    transition: "background 0.15s, color 0.15s",
+  },
+  startOverBtn: {
+    background: "none",
+    border: "none",
+    color: "#666",
+    fontSize: 11,
+    cursor: "pointer",
+    padding: 0,
+    fontFamily: "inherit",
+    textDecoration: "underline",
+    display: "inline",
+  },
+  archInfoPanel: {
+    borderBottom: "1px solid rgba(192,132,252,0.12)",
+    background: "rgba(124,58,237,0.04)",
+    flexShrink: 0,
+  },
+  explorerBody: {
+    display: "flex",
+    flex: 1,
+    overflow: "hidden",
+  },
+  // Left nav panel
+  sectionNav: {
+    width: 260,
+    flexShrink: 0,
+    borderRight: "1px solid rgba(255,255,255,0.05)",
+    background: "rgba(255,255,255,0.01)",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  },
+  navSearchRow: {
+    padding: "12px 12px 8px",
+    flexShrink: 0,
+    borderBottom: "1px solid rgba(255,255,255,0.04)",
+  },
+  navSearch: {
+    width: "100%",
+    boxSizing: "border-box",
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 8,
+    padding: "7px 10px",
+    fontSize: 12,
+    color: "#D0C0F0",
+    fontFamily: "inherit",
+    outline: "none",
+  },
+  navList: {
+    flex: 1,
+    overflowY: "auto",
+    padding: "4px 0 16px",
+  },
+  navItem: {
+    width: "100%",
+    textAlign: "left",
+    background: "none",
+    border: "none",
+    borderLeft: "3px solid transparent",
+    padding: "9px 12px 9px 11px",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    color: "inherit",
+    transition: "background 0.1s",
+  },
+  navItemSelected: {
+    background: "rgba(124,58,237,0.12)",
+    borderLeft: "3px solid #7C3AED",
+  },
+  navItemName: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#D0C0F0",
+    marginBottom: 2,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  navItemUrl: {
+    fontSize: 11,
+    color: "#555",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  navItemCount: {
+    fontSize: 11,
+    color: "#7777AA",
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 4,
+    padding: "1px 6px",
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+  },
+  navEmpty: {
+    padding: "20px 14px",
+    fontSize: 12,
+    color: "#555",
+    textAlign: "center",
+  },
+  // Right content panel
+  sectionPanel: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  },
+  panelHeader: {
+    padding: "14px 20px",
+    flexShrink: 0,
+    borderBottom: "1px solid rgba(255,255,255,0.05)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    background: "rgba(255,255,255,0.01)",
+  },
+  panelSectionName: {
+    fontSize: 15,
+    fontWeight: 700,
+    color: "#D0C0F0",
+    marginBottom: 2,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  panelSourceUrl: {
+    fontSize: 11,
+    color: "#555",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  panelTestCount: {
+    fontSize: 11,
+    color: "#7777AA",
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 5,
+    padding: "2px 9px",
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+  },
+  panelControls: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    padding: "6px 12px 6px 20px",
+    borderBottom: "1px solid rgba(255,255,255,0.04)",
+    flexShrink: 0,
+    flexWrap: "wrap",
+  },
+  panelSortRow: {
+    display: "flex",
+    gap: 4,
+    alignItems: "center",
+  },
+  sortBtn: {
+    background: "none",
+    border: "1px solid rgba(255,255,255,0.07)",
+    borderRadius: 6,
+    color: "#666",
+    fontSize: 11,
+    padding: "3px 8px",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    display: "flex",
+    alignItems: "center",
+    transition: "border-color 0.12s, color 0.12s",
+  },
+  sortBtnActive: {
+    border: "1px solid rgba(192,132,252,0.35)",
+    color: "#C084FC",
+    background: "rgba(124,58,237,0.08)",
+  },
+  panelFilterRow: {
+    display: "flex",
+    gap: 6,
+    alignItems: "center",
+  },
+  filterSelect: {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 6,
+    color: "#999",
+    fontSize: 11,
+    padding: "3px 6px",
+    fontFamily: "inherit",
+    outline: "none",
+    cursor: "pointer",
+  },
+  filterInput: {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 6,
+    color: "#D0C0F0",
+    fontSize: 11,
+    padding: "3px 8px",
+    fontFamily: "inherit",
+    outline: "none",
+    width: 120,
+  },
+  clearFiltersBtn: {
+    background: "none",
+    border: "none",
+    color: "#555",
+    fontSize: 11,
+    cursor: "pointer",
+    padding: "2px 4px",
+    fontFamily: "inherit",
+    lineHeight: 1,
+  },
+  panelCases: {
+    flex: 1,
+    overflowY: "auto",
+  },
+  panelEmpty: {
+    padding: "48px 24px",
+    fontSize: 13,
+    color: "#555",
+    textAlign: "center",
   },
 
   // Dashboard
@@ -2507,8 +3238,6 @@ styleEl.textContent = `
     .sg-how-grid { grid-template-columns: 1fr !important; }
     .sg-url-row  { flex-direction: column !important; }
     .sg-gen-btn  { padding: 12px 24px !important; width: 100% !important; }
-    .sg-github span { display: none !important; }
-    .sg-github { padding: 6px 8px !important; gap: 0 !important; }
   }
 `;
 document.head.appendChild(styleEl);
