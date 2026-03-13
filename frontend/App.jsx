@@ -126,6 +126,8 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
   const [suggestion, setSuggestion] = useState("");
   const [suggestField, setSuggestField] = useState("");
   const [isFetching, setIsFetching] = useState(false);
+  const [suggestError, setSuggestError] = useState("");
+  const errorTimerRef = useRef(null);
   const debounceRef = useRef(null);
   const abortRef = useRef(null);
   const steps = (testCase.steps || "").split("\n").filter(s => s.trim());
@@ -138,6 +140,7 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
   useEffect(() => {
     return () => {
       clearTimeout(debounceRef.current);
+      clearTimeout(errorTimerRef.current);
       abortRef.current?.abort();
     };
   }, []);
@@ -180,7 +183,15 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
           },
         }),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (res.status === 401) {
+          setSuggestError("Invalid API key");
+          setSuggestField(field);
+          clearTimeout(errorTimerRef.current);
+          errorTimerRef.current = setTimeout(() => setSuggestError(""), 5000);
+        }
+        return;
+      }
       const data = await res.json();
       if (data.suggestion) { setSuggestion(data.suggestion); setSuggestField(field); }
     } catch (err) {
@@ -289,6 +300,9 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
                     <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
                   </div>
                 )}
+                {suggestError && suggestField === "description" && (
+                  <div style={styles.suggestErrorChip}>⚠ {suggestError}</div>
+                )}
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Preconditions</div>
@@ -300,6 +314,9 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
                     <button style={styles.suggestionAcceptBtn} onClick={() => acceptSuggestion("preconditions")}>✓ Accept</button>
                     <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
                   </div>
+                )}
+                {suggestError && suggestField === "preconditions" && (
+                  <div style={styles.suggestErrorChip}>⚠ {suggestError}</div>
                 )}
               </div>
               <div>
@@ -313,6 +330,9 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
                     <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
                   </div>
                 )}
+                {suggestError && suggestField === "steps" && (
+                  <div style={styles.suggestErrorChip}>⚠ {suggestError}</div>
+                )}
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Expected Result</div>
@@ -324,6 +344,9 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
                     <button style={styles.suggestionAcceptBtn} onClick={() => acceptSuggestion("expected_result")}>✓ Accept</button>
                     <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
                   </div>
+                )}
+                {suggestError && suggestField === "expected_result" && (
+                  <div style={styles.suggestErrorChip}>⚠ {suggestError}</div>
                 )}
               </div>
             </>
@@ -435,7 +458,7 @@ function SectionCard({ section, defaultExpanded, isLast, sectionIdx, editMode, o
 function TestSuiteViewer({
   testSuite, crawlData, onDownloadXlsx, isDownloading, suiteId, onCopyLink, linkCopied,
   canEdit, editMode, editedSuite, isSaving, saveError, onEnterEdit, onCancelEdit, onSaveEdit, onTestCaseChange,
-  snapshotInfo, onRestoreSnapshot, isRestoring, apiKey,
+  snapshotInfo, onRestoreSnapshot, isRestoring, apiKey, onApiKeyChange,
 }) {
   const activeSuite = editMode ? editedSuite : testSuite;
   const totalTests = (activeSuite.sections || []).reduce((sum, s) => sum + (s.test_cases || []).length, 0);
@@ -486,6 +509,18 @@ function TestSuiteViewer({
               {saveError && (
                 <p style={{ fontSize: 11, color: "#FF8080", margin: 0, textAlign: "right" }}>{saveError}</p>
               )}
+              <div style={styles.inlineApiKeyRow}>
+                <span style={styles.inlineApiKeyLabel}>✦ AI key</span>
+                <input
+                  type="password"
+                  placeholder="sk-ant-… (for AI suggestions)"
+                  value={apiKey}
+                  onChange={e => onApiKeyChange?.(e.target.value)}
+                  style={styles.inlineApiKeyInput}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
             </>
           )}
           {/* Download / copy link (hidden in edit mode and snapshot view) */}
@@ -1632,6 +1667,7 @@ export default function App() {
             onRestoreSnapshot={handleRestoreFromViewer}
             isRestoring={isRestoring}
             apiKey={apiKey}
+            onApiKeyChange={setApiKey}
           />
         )}
 
@@ -2407,6 +2443,39 @@ const styles = {
     fontFamily: "inherit",
     padding: "2px 4px",
     flexShrink: 0,
+  },
+  suggestErrorChip: {
+    marginTop: 4,
+    padding: "5px 10px",
+    background: "rgba(239,68,68,0.08)",
+    border: "1px solid rgba(239,68,68,0.2)",
+    borderRadius: 6,
+    fontSize: 12,
+    color: "#F87171",
+  },
+  inlineApiKeyRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 2,
+  },
+  inlineApiKeyLabel: {
+    fontSize: 11,
+    color: "#555",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
+  inlineApiKeyInput: {
+    flex: 1,
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 6,
+    color: "#C8C0D8",
+    fontSize: 12,
+    padding: "4px 8px",
+    fontFamily: "monospace",
+    outline: "none",
+    minWidth: 0,
   },
 };
 

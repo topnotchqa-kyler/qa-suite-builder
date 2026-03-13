@@ -23,6 +23,8 @@ import io
 
 load_dotenv()
 
+import anthropic
+
 from auth import get_optional_user_id, get_required_user_id
 from crawler import crawl_site
 from generation import generate_test_suite, generate_field_suggestion
@@ -292,6 +294,8 @@ async def ai_suggest_endpoint(request: Request, body: AiSuggestRequest):
             body.field, body.current_value, body.context, api_key,
         )
         return JSONResponse(content={"suggestion": suggestion})
+    except anthropic.AuthenticationError:
+        raise HTTPException(status_code=401, detail="Invalid Anthropic API key.")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception:

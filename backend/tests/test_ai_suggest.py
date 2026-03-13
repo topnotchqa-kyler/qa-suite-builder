@@ -3,6 +3,8 @@ Unit and integration tests for POST /api/ai-suggest endpoint
 and generate_field_suggestion() service function.
 """
 import pytest
+import httpx
+import anthropic
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 
@@ -188,3 +190,29 @@ class TestAiSuggestEndpoint:
             },
         )
         assert res.status_code == 500
+
+    def test_invalid_api_key_returns_401(self, mocker):
+        """401 with descriptive message when Anthropic rejects the API key."""
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 401
+        mock_response.headers = httpx.Headers({})
+        mock_response.request = MagicMock()
+        mocker.patch(
+            "main.generate_field_suggestion",
+            side_effect=anthropic.AuthenticationError(
+                message="Invalid API key.",
+                response=mock_response,
+                body={"type": "error", "error": {"type": "authentication_error", "message": "Invalid API key."}},
+            ),
+        )
+        res = client.post(
+            "/api/ai-suggest",
+            json={
+                "field": "description",
+                "current_value": "This test validates something important here",
+                "context": {},
+            },
+            headers={"X-Api-Key": "sk-ant-invalid"},
+        )
+        assert res.status_code == 401
+        assert "Invalid" in res.json()["detail"]
