@@ -987,8 +987,12 @@ function SuiteExplorer({
                 <span style={{ fontSize: 11, letterSpacing: "0.04em" }}>Visual sitemap coming soon</span>
               </div>
             </div>
-            {/* Row 2: crawl stats — full width */}
-            {crawlData && <SiteArchitectureCard crawlData={crawlData} />}
+            {/* Row 2: crawl stats — hug content width */}
+            {crawlData && (
+              <div style={{ width: "fit-content" }}>
+                <SiteArchitectureCard crawlData={crawlData} />
+              </div>
+            )}
           </div>
           <div style={{ height: 16 }} />
         </div>
