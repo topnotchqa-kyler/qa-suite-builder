@@ -625,6 +625,296 @@ function TestSuiteViewer({
   );
 }
 
+// ── SuiteExplorer (two-panel master-detail) ───────────────────────────────────
+
+function SectionNavItem({ section, isSelected, onClick }) {
+  const tests = section.test_cases || [];
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        ...styles.navItem,
+        ...(isSelected ? styles.navItemSelected : {}),
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6 }}>
+        <div style={styles.navItemName}>{section.name}</div>
+        <span style={styles.navItemCount}>{tests.length}</span>
+      </div>
+      <div style={styles.navItemUrl}>{section.source_url}</div>
+    </button>
+  );
+}
+
+function SectionNav({ sections, selectedIdx, onSelect, search, onSearch }) {
+  return (
+    <div style={styles.sectionNav}>
+      <div style={styles.navSearchRow}>
+        <input
+          placeholder="Filter sections…"
+          value={search}
+          onChange={e => onSearch(e.target.value)}
+          style={styles.navSearch}
+        />
+      </div>
+      <div style={styles.navList}>
+        {sections.map((sec, i) => (
+          <SectionNavItem
+            key={sec.source_url || i}
+            section={sec}
+            isSelected={selectedIdx === i}
+            onClick={() => onSelect(i)}
+          />
+        ))}
+        {sections.length === 0 && (
+          <div style={styles.navEmpty}>No sections match</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SectionPanel({ section, sectionIdx, editMode, onTestCaseChange, apiKey }) {
+  if (!section) {
+    return <div style={styles.panelEmpty}>← Select a section from the left panel</div>;
+  }
+  const tests = section.test_cases || [];
+  return (
+    <div style={styles.sectionPanel}>
+      <div style={styles.panelHeader}>
+        <div style={{ minWidth: 0 }}>
+          <div style={styles.panelSectionName}>{section.name}</div>
+          <div style={styles.panelSourceUrl}>{section.source_url}</div>
+        </div>
+        <span style={styles.panelTestCount}>{tests.length} test{tests.length !== 1 ? "s" : ""}</span>
+      </div>
+      <div style={styles.panelCases}>
+        {tests.map((tc, i) => (
+          <TestCaseRow
+            key={tc.id || i}
+            testCase={tc}
+            isLast={i === tests.length - 1}
+            sectionIdx={sectionIdx}
+            testCaseIdx={i}
+            editMode={editMode}
+            onTestCaseChange={onTestCaseChange}
+            apiKey={apiKey}
+          />
+        ))}
+        {tests.length === 0 && (
+          <div style={styles.panelEmpty}>No test cases in this section.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SuiteExplorer({
+  testSuite, crawlData,
+  onDownloadXlsx, isDownloading, suiteId, onCopyLink, linkCopied,
+  canEdit, editMode, editedSuite, isSaving, saveError,
+  onEnterEdit, onCancelEdit, onSaveEdit, onTestCaseChange,
+  snapshotInfo, onRestoreSnapshot, isRestoring,
+  apiKey, onApiKeyChange,
+  submittedUrl, onReset,
+}) {
+  const activeSuite = editMode ? editedSuite : testSuite;
+  const sections = activeSuite?.sections || [];
+  const totalTests = sections.reduce((s, sec) => s + (sec.test_cases || []).length, 0);
+
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [search, setSearch] = useState("");
+  const [infoOpen, setInfoOpen] = useState(false);
+
+  // Filter sections by name or URL
+  const filteredSections = search.trim()
+    ? sections.filter(s =>
+        s.name?.toLowerCase().includes(search.toLowerCase()) ||
+        s.source_url?.toLowerCase().includes(search.toLowerCase())
+      )
+    : sections;
+
+  // Map filtered position back to original index for correct test case loading
+  function handleSelectFiltered(filteredPos) {
+    const sec = filteredSections[filteredPos];
+    const origIdx = sections.indexOf(sec);
+    setSelectedIdx(origIdx >= 0 ? origIdx : 0);
+  }
+
+  // Find filtered position of selected section (for highlight)
+  const selectedFilteredIdx = filteredSections.indexOf(sections[selectedIdx]);
+  const selectedSection = sections[selectedIdx] ?? null;
+
+  return (
+    <div style={styles.explorer}>
+      {/* Explorer header */}
+      <div style={styles.explorerHeader}>
+        <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+          <h2 style={styles.explorerTitle}>
+            {activeSuite.site_name} — Test Suite
+          </h2>
+          <div style={styles.explorerMeta}>
+            {crawlData?.pages_crawled ?? 0} pages
+            &nbsp;·&nbsp;{sections.length} sections
+            &nbsp;·&nbsp;{totalTests} tests
+            {onReset && (
+              <>&nbsp;·&nbsp;<button onClick={onReset} style={styles.startOverBtn}>Start over</button></>
+            )}
+          </div>
+        </div>
+        <div style={styles.explorerActions}>
+          <button
+            onClick={() => setInfoOpen(v => !v)}
+            style={{
+              ...styles.infoToggleBtn,
+              ...(infoOpen ? { background: "rgba(124,58,237,0.15)", color: "#C084FC", border: "1px solid rgba(192,132,252,0.3)" } : {}),
+            }}
+            title="Toggle site architecture info"
+          >
+            ℹ {infoOpen ? "Hide info" : "Site info"}
+          </button>
+          {canEdit && !editMode && (
+            <button onClick={onEnterEdit} style={styles.editBtn}>✏ Edit</button>
+          )}
+          {editMode && (
+            <>
+              <button
+                onClick={onSaveEdit}
+                disabled={isSaving}
+                style={{ ...styles.saveBtn, opacity: isSaving ? 0.6 : 1, cursor: isSaving ? "not-allowed" : "pointer" }}
+              >
+                {isSaving ? "Saving…" : "Save changes"}
+              </button>
+              <button onClick={onCancelEdit} disabled={isSaving} style={styles.cancelEditBtn}>
+                Cancel
+              </button>
+            </>
+          )}
+          {!editMode && !snapshotInfo && (
+            <>
+              <button
+                onClick={onDownloadXlsx}
+                disabled={isDownloading}
+                style={{
+                  background: isDownloading ? "rgba(124,58,237,0.2)" : "linear-gradient(135deg,#7C3AED,#5B21B6)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 9,
+                  padding: "8px 16px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: isDownloading ? "not-allowed" : "pointer",
+                  whiteSpace: "nowrap",
+                  opacity: isDownloading ? 0.6 : 1,
+                  fontFamily: "inherit",
+                  transition: "opacity 0.15s",
+                }}
+              >
+                {isDownloading ? "Preparing…" : "⬇ Download .xlsx"}
+              </button>
+              {suiteId && (
+                <button
+                  onClick={onCopyLink}
+                  style={{
+                    background: "none",
+                    border: "1px solid rgba(192,132,252,0.25)",
+                    borderRadius: 7,
+                    padding: "6px 12px",
+                    fontSize: 11,
+                    color: linkCopied ? "#86EFAC" : "#9070C0",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    whiteSpace: "nowrap",
+                    transition: "color 0.15s",
+                  }}
+                >
+                  {linkCopied ? "✓ Link copied" : "🔗 Copy link"}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Edit mode: save error + AI key row */}
+      {editMode && (
+        <div style={{
+          padding: "8px 24px",
+          borderBottom: "1px solid rgba(192,132,252,0.1)",
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+          flexWrap: "wrap",
+          flexShrink: 0,
+          background: "rgba(124,58,237,0.04)",
+        }}>
+          {saveError && (
+            <p style={{ fontSize: 11, color: "#FF8080", margin: 0 }}>{saveError}</p>
+          )}
+          <div style={styles.inlineApiKeyRow}>
+            <span style={styles.inlineApiKeyLabel}>✦ AI key</span>
+            <input
+              type="password"
+              placeholder="sk-ant-… (for AI suggestions)"
+              value={apiKey}
+              onChange={e => onApiKeyChange?.(e.target.value)}
+              style={styles.inlineApiKeyInput}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Collapsible architecture info panel */}
+      {infoOpen && (
+        <div style={styles.archInfoPanel}>
+          {activeSuite.summary && (
+            <p style={{ fontSize: 13, color: "#9090A8", margin: "0 0 14px", lineHeight: 1.6 }}>
+              {activeSuite.summary}
+            </p>
+          )}
+          {crawlData && <SiteArchitectureCard crawlData={crawlData} />}
+        </div>
+      )}
+
+      {/* Snapshot banner */}
+      {snapshotInfo && (
+        <div style={styles.snapshotBanner}>
+          <span>
+            ⏪ Viewing <strong>Version {snapshotInfo.versionNumber}</strong> of {snapshotInfo.siteName} — historical snapshot
+          </span>
+          <button
+            onClick={onRestoreSnapshot}
+            disabled={isRestoring}
+            style={{ ...styles.restoreBtn, opacity: isRestoring ? 0.6 : 1, cursor: isRestoring ? "not-allowed" : "pointer" }}
+          >
+            {isRestoring ? "Restoring…" : "Restore this version →"}
+          </button>
+        </div>
+      )}
+
+      {/* Two-panel body */}
+      <div style={styles.explorerBody}>
+        <SectionNav
+          sections={filteredSections}
+          selectedIdx={selectedFilteredIdx}
+          onSelect={handleSelectFiltered}
+          search={search}
+          onSearch={setSearch}
+        />
+        <SectionPanel
+          section={selectedSection}
+          sectionIdx={selectedIdx}
+          editMode={editMode}
+          onTestCaseChange={onTestCaseChange}
+          apiKey={apiKey}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 function Dashboard({
@@ -1442,9 +1732,9 @@ export default function App() {
         />
       ) : (
 
-      <main style={styles.main}>
+      <main style={phase === "done" ? styles.mainExplorer : styles.main}>
         {/* Header */}
-        <header style={styles.header}>
+        {phase !== "done" && (<header style={styles.header}>
           <div style={styles.logo}>
             <svg width="42" height="42" viewBox="0 0 32 32" aria-hidden="true" style={styles.logoSvg}>
               <defs>
@@ -1465,6 +1755,7 @@ export default function App() {
             AI-assisted QA test suite generation for any website — crawl the UI, get structured, downloadable test cases in minutes.
           </p>
         </header>
+        )}
 
         {/* ── Form card (idle + error) or URL strip (active/done) ── */}
         {phase === "idle" || phase === "error" ? (
@@ -1551,8 +1842,8 @@ export default function App() {
               )}
             </form>
           </div>
-        ) : (
-          /* Compact URL strip shown during active phases */
+        ) : phase !== "done" ? (
+          /* Compact URL strip shown during active phases (hidden in done — folded into ExplorerHeader) */
           <div style={{ ...styles.card, padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
               <span style={{ fontSize: 11, color: "#666", flexShrink: 0 }}>
@@ -1568,10 +1859,10 @@ export default function App() {
               </button>
             )}
           </div>
-        )}
+        ) : null}
 
         {/* ── Step indicators ── */}
-        {phase !== "idle" && phase !== "error" && (
+        {phase !== "idle" && phase !== "error" && phase !== "done" && (
           <div style={styles.progressCard} role="status" aria-live="polite">
             <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 11 }}>
               {STEPS.map((step, i) => {
@@ -1619,7 +1910,7 @@ export default function App() {
         )}
 
         {/* ── Architecture card (crawled → done) ── */}
-        {crawlData && ["crawled", "generating", "done"].includes(phase) && (
+        {crawlData && ["crawled", "generating"].includes(phase) && (
           <SiteArchitectureCard crawlData={crawlData} />
         )}
 
@@ -1659,9 +1950,9 @@ export default function App() {
           </div>
         )}
 
-        {/* ── Test suite viewer (done phase) ── */}
+        {/* ── Suite explorer — two-panel master-detail (done phase) ── */}
         {phase === "done" && testSuiteData && (
-          <TestSuiteViewer
+          <SuiteExplorer
             testSuite={testSuiteData}
             crawlData={crawlData}
             onDownloadXlsx={handleDownloadXlsx}
@@ -1683,6 +1974,8 @@ export default function App() {
             isRestoring={isRestoring}
             apiKey={apiKey}
             onApiKeyChange={setApiKey}
+            submittedUrl={submittedUrl}
+            onReset={handleReset}
           />
         )}
 
@@ -2246,6 +2539,221 @@ const styles = {
     fontSize: 13,
     fontFamily: "inherit",
     outline: "none",
+  },
+
+  // Suite Explorer (two-panel master-detail)
+  mainExplorer: {
+    position: "relative",
+    zIndex: 1,
+    maxWidth: "100%",
+    margin: 0,
+    padding: 0,
+    height: "100vh",
+    overflow: "hidden",
+  },
+  explorer: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+  },
+  explorerHeader: {
+    background: "rgba(124,58,237,0.08)",
+    borderBottom: "1px solid rgba(192,132,252,0.15)",
+    // Right padding clears the fixed Sign-in + GitHub buttons (~165px wide)
+    padding: "14px 175px 14px 24px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    flexShrink: 0,
+  },
+  explorerTitle: {
+    fontSize: 17,
+    fontWeight: 700,
+    color: "#E2C4FF",
+    margin: "0 0 3px",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  explorerMeta: {
+    fontSize: 12,
+    color: "#7777AA",
+    lineHeight: 1.5,
+  },
+  explorerActions: {
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+    flexShrink: 0,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+  },
+  infoToggleBtn: {
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 7,
+    color: "#9080BA",
+    fontSize: 12,
+    padding: "5px 10px",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    whiteSpace: "nowrap",
+    transition: "background 0.15s, color 0.15s",
+  },
+  startOverBtn: {
+    background: "none",
+    border: "none",
+    color: "#666",
+    fontSize: 11,
+    cursor: "pointer",
+    padding: 0,
+    fontFamily: "inherit",
+    textDecoration: "underline",
+    display: "inline",
+  },
+  archInfoPanel: {
+    borderBottom: "1px solid rgba(192,132,252,0.12)",
+    background: "rgba(124,58,237,0.04)",
+    flexShrink: 0,
+  },
+  explorerBody: {
+    display: "flex",
+    flex: 1,
+    overflow: "hidden",
+  },
+  // Left nav panel
+  sectionNav: {
+    width: 260,
+    flexShrink: 0,
+    borderRight: "1px solid rgba(255,255,255,0.05)",
+    background: "rgba(255,255,255,0.01)",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  },
+  navSearchRow: {
+    padding: "12px 12px 8px",
+    flexShrink: 0,
+    borderBottom: "1px solid rgba(255,255,255,0.04)",
+  },
+  navSearch: {
+    width: "100%",
+    boxSizing: "border-box",
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 8,
+    padding: "7px 10px",
+    fontSize: 12,
+    color: "#D0C0F0",
+    fontFamily: "inherit",
+    outline: "none",
+  },
+  navList: {
+    flex: 1,
+    overflowY: "auto",
+    padding: "4px 0 16px",
+  },
+  navItem: {
+    width: "100%",
+    textAlign: "left",
+    background: "none",
+    border: "none",
+    borderLeft: "3px solid transparent",
+    padding: "9px 12px 9px 11px",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    color: "inherit",
+    transition: "background 0.1s",
+  },
+  navItemSelected: {
+    background: "rgba(124,58,237,0.12)",
+    borderLeft: "3px solid #7C3AED",
+  },
+  navItemName: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#D0C0F0",
+    marginBottom: 2,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  navItemUrl: {
+    fontSize: 11,
+    color: "#555",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  navItemCount: {
+    fontSize: 11,
+    color: "#7777AA",
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 4,
+    padding: "1px 6px",
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+  },
+  navEmpty: {
+    padding: "20px 14px",
+    fontSize: 12,
+    color: "#555",
+    textAlign: "center",
+  },
+  // Right content panel
+  sectionPanel: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  },
+  panelHeader: {
+    padding: "14px 20px",
+    flexShrink: 0,
+    borderBottom: "1px solid rgba(255,255,255,0.05)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    background: "rgba(255,255,255,0.01)",
+  },
+  panelSectionName: {
+    fontSize: 15,
+    fontWeight: 700,
+    color: "#D0C0F0",
+    marginBottom: 2,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  panelSourceUrl: {
+    fontSize: 11,
+    color: "#555",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  panelTestCount: {
+    fontSize: 11,
+    color: "#7777AA",
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 5,
+    padding: "2px 9px",
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+  },
+  panelCases: {
+    flex: 1,
+    overflowY: "auto",
+  },
+  panelEmpty: {
+    padding: "48px 24px",
+    fontSize: 13,
+    color: "#555",
+    textAlign: "center",
   },
 
   // Dashboard
