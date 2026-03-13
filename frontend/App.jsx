@@ -294,7 +294,7 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
                 <textarea rows={3} value={testCase.description || ""} onChange={e => handleFieldChange("description", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "description")} style={styles.editTextarea} placeholder="Describe the test case..." />
                 {suggestion && suggestField === "description" && (
                   <div style={styles.suggestionChip}>
-                    <span style={styles.suggestionText}>{suggestion.length > 120 ? suggestion.slice(0, 120) + "…" : suggestion}</span>
+                    <span style={styles.suggestionText}>{suggestion}</span>
                     <span style={styles.suggestionHint}>Tab to accept</span>
                     <button style={styles.suggestionAcceptBtn} onClick={() => acceptSuggestion("description")}>✓ Accept</button>
                     <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
@@ -309,7 +309,7 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
                 <textarea rows={2} value={testCase.preconditions || ""} onChange={e => handleFieldChange("preconditions", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "preconditions")} style={styles.editTextarea} placeholder="Preconditions..." />
                 {suggestion && suggestField === "preconditions" && (
                   <div style={styles.suggestionChip}>
-                    <span style={styles.suggestionText}>{suggestion.length > 120 ? suggestion.slice(0, 120) + "…" : suggestion}</span>
+                    <span style={styles.suggestionText}>{suggestion}</span>
                     <span style={styles.suggestionHint}>Tab to accept</span>
                     <button style={styles.suggestionAcceptBtn} onClick={() => acceptSuggestion("preconditions")}>✓ Accept</button>
                     <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
@@ -324,7 +324,7 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
                 <textarea rows={5} value={testCase.steps || ""} onChange={e => handleFieldChange("steps", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "steps")} style={styles.editTextarea} placeholder={"1. Step one\n2. Step two"} />
                 {suggestion && suggestField === "steps" && (
                   <div style={styles.suggestionChip}>
-                    <span style={styles.suggestionText}>{suggestion.length > 120 ? suggestion.slice(0, 120) + "…" : suggestion}</span>
+                    <span style={styles.suggestionText}>{suggestion}</span>
                     <span style={styles.suggestionHint}>Tab to accept</span>
                     <button style={styles.suggestionAcceptBtn} onClick={() => acceptSuggestion("steps")}>✓ Accept</button>
                     <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
@@ -339,7 +339,7 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
                 <textarea rows={2} value={testCase.expected_result || ""} onChange={e => handleFieldChange("expected_result", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "expected_result")} style={styles.editTextarea} placeholder="Expected result..." />
                 {suggestion && suggestField === "expected_result" && (
                   <div style={styles.suggestionChip}>
-                    <span style={styles.suggestionText}>{suggestion.length > 120 ? suggestion.slice(0, 120) + "…" : suggestion}</span>
+                    <span style={styles.suggestionText}>{suggestion}</span>
                     <span style={styles.suggestionHint}>Tab to accept</span>
                     <button style={styles.suggestionAcceptBtn} onClick={() => acceptSuggestion("expected_result")}>✓ Accept</button>
                     <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
@@ -2398,7 +2398,7 @@ const styles = {
   // ── AI suggestion chip ──────────────────────────────────────────────────────
   suggestionChip: {
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 8,
     marginTop: 4,
     padding: "6px 10px",
@@ -2411,9 +2411,8 @@ const styles = {
     flex: 1,
     color: "#9080BA",
     fontStyle: "italic",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    lineHeight: 1.5,
+    wordBreak: "break-word",
   },
   suggestionHint: {
     color: "#555",
