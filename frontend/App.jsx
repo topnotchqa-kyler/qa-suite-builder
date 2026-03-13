@@ -130,6 +130,7 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
   const errorTimerRef = useRef(null);
   const debounceRef = useRef(null);
   const abortRef = useRef(null);
+  const textareaRefs = useRef({});
   const steps = (testCase.steps || "").split("\n").filter(s => s.trim());
   const priorityStyle = PRIORITY_STYLE[testCase.priority] || PRIORITY_STYLE.Low;
 
@@ -199,18 +200,32 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
     } finally { setIsFetching(false); }
   }
 
+  function insertSuggestion(el, field) {
+    // Use execCommand so the insertion lands on the browser's undo stack (Cmd+Z works).
+    // Select any trailing whitespace first so we don't accumulate double spaces.
+    const trimmedLen = (testCase[field] || "").trimEnd().length;
+    try {
+      el.focus();
+      el.setSelectionRange(trimmedLen, el.value.length);
+      document.execCommand("insertText", false, " " + suggestion);
+    } catch {
+      // execCommand not available — fall back to direct state update (no undo support)
+      onTestCaseChange?.(sectionIdx, testCaseIdx, field, (testCase[field] || "").trimEnd() + " " + suggestion);
+    }
+    setSuggestion(""); setSuggestField("");
+  }
+
   function handleTextareaKeyDown(e, field) {
     if (e.key === "Tab" && suggestion && suggestField === field) {
       e.preventDefault();
-      onTestCaseChange?.(sectionIdx, testCaseIdx, field, (testCase[field] || "").trimEnd() + " " + suggestion);
-      setSuggestion(""); setSuggestField("");
+      insertSuggestion(e.target, field);
     }
     if (e.key === "Escape" && suggestion) { setSuggestion(""); setSuggestField(""); }
   }
 
   function acceptSuggestion(field) {
-    onTestCaseChange?.(sectionIdx, testCaseIdx, field, (testCase[field] || "").trimEnd() + " " + suggestion);
-    setSuggestion(""); setSuggestField("");
+    const el = textareaRefs.current[field];
+    if (el) insertSuggestion(el, field);
   }
 
   return (
@@ -291,12 +306,12 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
                   Description
                   {isFetching && suggestField !== "description" && !suggestion && <span style={{ marginLeft: 6, color: "#555", fontSize: 10 }}>●</span>}
                 </div>
-                <textarea rows={3} value={testCase.description || ""} onChange={e => handleFieldChange("description", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "description")} style={styles.editTextarea} placeholder="Describe the test case..." />
+                <textarea rows={3} ref={el => { textareaRefs.current["description"] = el; }} value={testCase.description || ""} onChange={e => handleFieldChange("description", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "description")} style={styles.editTextarea} placeholder="Describe the test case..." />
                 {suggestion && suggestField === "description" && (
                   <div style={styles.suggestionChip}>
                     <span style={styles.suggestionText}>{suggestion}</span>
                     <span style={styles.suggestionHint}>Tab to accept</span>
-                    <button style={styles.suggestionAcceptBtn} onClick={() => acceptSuggestion("description")}>✓ Accept</button>
+                    <button style={styles.suggestionAcceptBtn} onMouseDown={e => e.preventDefault()} onClick={() => acceptSuggestion("description")}>✓ Accept</button>
                     <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
                   </div>
                 )}
@@ -306,12 +321,12 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Preconditions</div>
-                <textarea rows={2} value={testCase.preconditions || ""} onChange={e => handleFieldChange("preconditions", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "preconditions")} style={styles.editTextarea} placeholder="Preconditions..." />
+                <textarea rows={2} ref={el => { textareaRefs.current["preconditions"] = el; }} value={testCase.preconditions || ""} onChange={e => handleFieldChange("preconditions", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "preconditions")} style={styles.editTextarea} placeholder="Preconditions..." />
                 {suggestion && suggestField === "preconditions" && (
                   <div style={styles.suggestionChip}>
                     <span style={styles.suggestionText}>{suggestion}</span>
                     <span style={styles.suggestionHint}>Tab to accept</span>
-                    <button style={styles.suggestionAcceptBtn} onClick={() => acceptSuggestion("preconditions")}>✓ Accept</button>
+                    <button style={styles.suggestionAcceptBtn} onMouseDown={e => e.preventDefault()} onClick={() => acceptSuggestion("preconditions")}>✓ Accept</button>
                     <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
                   </div>
                 )}
@@ -321,12 +336,12 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Steps</div>
-                <textarea rows={5} value={testCase.steps || ""} onChange={e => handleFieldChange("steps", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "steps")} style={styles.editTextarea} placeholder={"1. Step one\n2. Step two"} />
+                <textarea rows={5} ref={el => { textareaRefs.current["steps"] = el; }} value={testCase.steps || ""} onChange={e => handleFieldChange("steps", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "steps")} style={styles.editTextarea} placeholder={"1. Step one\n2. Step two"} />
                 {suggestion && suggestField === "steps" && (
                   <div style={styles.suggestionChip}>
                     <span style={styles.suggestionText}>{suggestion}</span>
                     <span style={styles.suggestionHint}>Tab to accept</span>
-                    <button style={styles.suggestionAcceptBtn} onClick={() => acceptSuggestion("steps")}>✓ Accept</button>
+                    <button style={styles.suggestionAcceptBtn} onMouseDown={e => e.preventDefault()} onClick={() => acceptSuggestion("steps")}>✓ Accept</button>
                     <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
                   </div>
                 )}
@@ -336,12 +351,12 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Expected Result</div>
-                <textarea rows={2} value={testCase.expected_result || ""} onChange={e => handleFieldChange("expected_result", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "expected_result")} style={styles.editTextarea} placeholder="Expected result..." />
+                <textarea rows={2} ref={el => { textareaRefs.current["expected_result"] = el; }} value={testCase.expected_result || ""} onChange={e => handleFieldChange("expected_result", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "expected_result")} style={styles.editTextarea} placeholder="Expected result..." />
                 {suggestion && suggestField === "expected_result" && (
                   <div style={styles.suggestionChip}>
                     <span style={styles.suggestionText}>{suggestion}</span>
                     <span style={styles.suggestionHint}>Tab to accept</span>
-                    <button style={styles.suggestionAcceptBtn} onClick={() => acceptSuggestion("expected_result")}>✓ Accept</button>
+                    <button style={styles.suggestionAcceptBtn} onMouseDown={e => e.preventDefault()} onClick={() => acceptSuggestion("expected_result")}>✓ Accept</button>
                     <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
                   </div>
                 )}
