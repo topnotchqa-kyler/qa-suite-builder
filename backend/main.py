@@ -25,7 +25,7 @@ load_dotenv()
 
 from auth import get_optional_user_id, get_required_user_id
 from crawler import crawl_site
-from generation import generate_test_suite
+from generation import generate_test_suite, generate_field_suggestion
 from xlsx_builder import build_workbook
 from storage import (
     save_suite, get_suite, list_suites,
@@ -72,6 +72,12 @@ class CrawlOnlyRequest(BaseModel):
 
 class PatchSuiteRequest(BaseModel):
     test_suite: dict
+
+
+class AiSuggestRequest(BaseModel):
+    field: str          # "description"|"preconditions"|"steps"|"expected_result"
+    current_value: str
+    context: dict       # title, priority, category, and the other three fields
 
 
 def _validate_url(url: str) -> None:
@@ -259,6 +265,38 @@ async def generate_from_crawl_endpoint(
     except Exception:
         logger.exception("Generate-from-crawl error")
         raise HTTPException(status_code=500, detail="An error occurred generating the test suite. Please try again.")
+
+
+SUGGEST_FIELDS = {"description", "preconditions", "steps", "expected_result"}
+
+
+@app.post("/api/ai-suggest")
+@limiter.limit("20/minute")
+async def ai_suggest_endpoint(request: Request, body: AiSuggestRequest):
+    """
+    Return a short AI-generated continuation for an in-progress test case field.
+    Requires X-Api-Key header or ANTHROPIC_API_KEY env var.
+    Rate-limited to 20 requests per minute per IP.
+    """
+    if body.field not in SUGGEST_FIELDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"field must be one of: {', '.join(sorted(SUGGEST_FIELDS))}",
+        )
+    if not body.current_value or len(body.current_value.strip()) < 15:
+        raise HTTPException(status_code=400, detail="current_value must be at least 15 characters.")
+    api_key = request.headers.get("x-api-key") or None
+    try:
+        suggestion = await asyncio.to_thread(
+            generate_field_suggestion,
+            body.field, body.current_value, body.context, api_key,
+        )
+        return JSONResponse(content={"suggestion": suggestion})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        logger.exception("AI suggest error for field: %s", body.field)
+        raise HTTPException(status_code=500, detail="Could not generate suggestion.")
 
 
 @app.get("/api/suites")
