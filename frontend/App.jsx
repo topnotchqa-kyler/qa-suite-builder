@@ -135,10 +135,6 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
   const priorityStyle = PRIORITY_STYLE[testCase.priority] || PRIORITY_STYLE.Low;
 
   useEffect(() => {
-    if (editMode) setExpanded(true);
-  }, [editMode]);
-
-  useEffect(() => {
     return () => {
       clearTimeout(debounceRef.current);
       clearTimeout(errorTimerRef.current);
