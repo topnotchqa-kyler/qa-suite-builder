@@ -9,8 +9,8 @@ import os
 import anthropic
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-MODEL = "claude-sonnet-4-20250514"
-SUGGEST_MODEL = "claude-3-5-haiku-20241022"
+MODEL = "claude-sonnet-4-6"
+SUGGEST_MODEL = "claude-haiku-4-5-20251001"
 
 
 def generate_test_suite(crawl_data: dict, api_key: str = None) -> dict:
