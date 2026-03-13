@@ -949,13 +949,46 @@ function SuiteExplorer({
       {/* Collapsible architecture info panel */}
       {infoOpen && (
         <div style={styles.archInfoPanel}>
-          <div style={{ maxWidth: 720, padding: "14px 24px 16px" }}>
-            {activeSuite.summary && (
-              <p style={{ fontSize: 13, color: "#9090A8", margin: "0 0 14px", lineHeight: 1.6 }}>
-                {activeSuite.summary}
-              </p>
-            )}
-            {crawlData && <SiteArchitectureCard crawlData={crawlData} />}
+          <div style={{ display: "flex", gap: 24, padding: "14px 24px 16px", alignItems: "flex-start" }}>
+            {/* Left: summary + crawl stats */}
+            <div style={{ flex: "0 0 auto", maxWidth: 480, minWidth: 0 }}>
+              {activeSuite.summary && (
+                <p style={{ fontSize: 13, color: "#9090A8", margin: "0 0 14px", lineHeight: 1.6 }}>
+                  {activeSuite.summary}
+                </p>
+              )}
+              {crawlData && <SiteArchitectureCard crawlData={crawlData} />}
+            </div>
+            {/* Right: sitemap diagram placeholder */}
+            <div style={{
+              flex: 1,
+              minHeight: 140,
+              border: "1px dashed rgba(255,255,255,0.07)",
+              borderRadius: 10,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              color: "#333",
+              userSelect: "none",
+            }}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="5" height="4" rx="1" />
+                <rect x="10" y="3" width="5" height="4" rx="1" />
+                <rect x="17" y="3" width="4" height="4" rx="1" />
+                <rect x="8" y="11" width="5" height="4" rx="1" />
+                <rect x="8" y="19" width="5" height="4" rx="1" />
+                <line x1="5.5" y1="7" x2="5.5" y2="9.5" />
+                <line x1="5.5" y1="9.5" x2="10.5" y2="9.5" />
+                <line x1="10.5" y1="9.5" x2="10.5" y2="11" />
+                <line x1="12.5" y1="7" x2="12.5" y2="11" />
+                <line x1="19" y1="7" x2="19" y2="9.5" />
+                <line x1="19" y1="9.5" x2="13" y2="9.5" />
+                <line x1="10.5" y1="15" x2="10.5" y2="19" />
+              </svg>
+              <span style={{ fontSize: 11, letterSpacing: "0.04em" }}>Visual sitemap coming soon</span>
+            </div>
           </div>
         </div>
       )}
