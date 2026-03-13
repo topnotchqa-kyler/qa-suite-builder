@@ -1315,8 +1315,26 @@ export default function App() {
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
+      if (event === "SIGNED_OUT") {
+        setPhase("idle");
+        setCrawlData(null);
+        setTestSuiteData(null);
+        setSuiteId(null);
+        setSuiteOwnerId(null);
+        setError("");
+        setSubmittedUrl("");
+        setEditMode(false);
+        setEditedSuite(null);
+        setSaveError("");
+        setViewingSnapshot(null);
+        setIsRestoring(false);
+        setIsDownloading(false);
+        setLinkCopied(false);
+        setCurrentPage("home");
+        window.history.replaceState({}, "", "/");
+      }
     });
 
     return () => subscription.unsubscribe();
