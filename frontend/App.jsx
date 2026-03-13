@@ -121,10 +121,18 @@ function SiteArchitectureCard({ crawlData }) {
 
 // ── TestCaseRow ───────────────────────────────────────────────────────────────
 
-function TestCaseRow({ testCase, isLast }) {
+function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTestCaseChange }) {
   const [expanded, setExpanded] = useState(false);
   const steps = (testCase.steps || "").split("\n").filter(s => s.trim());
   const priorityStyle = PRIORITY_STYLE[testCase.priority] || PRIORITY_STYLE.Low;
+
+  useEffect(() => {
+    if (editMode) setExpanded(true);
+  }, [editMode]);
+
+  function onChange(field, value) {
+    onTestCaseChange?.(sectionIdx, testCaseIdx, field, value);
+  }
 
   return (
     <div style={{ borderBottom: isLast ? "none" : "1px solid rgba(255,255,255,0.03)" }}>
@@ -151,9 +159,20 @@ function TestCaseRow({ testCase, isLast }) {
         <span style={{ fontSize: 11, color: "#555", fontFamily: "monospace", flexShrink: 0 }}>
           {testCase.id}
         </span>
-        <span style={{ flex: 1, fontSize: 13, color: "#C8C0D8", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {testCase.title}
-        </span>
+        {editMode ? (
+          <input
+            type="text"
+            value={testCase.title || ""}
+            onChange={e => onChange("title", e.target.value)}
+            onClick={e => e.stopPropagation()}
+            style={styles.editInput}
+            placeholder="Test case title"
+          />
+        ) : (
+          <span style={{ flex: 1, fontSize: 13, color: "#C8C0D8", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {testCase.title}
+          </span>
+        )}
         <span style={{ color: "#444", fontSize: 9, flexShrink: 0, marginLeft: 4 }}>
           {expanded ? "▲" : "▶"}
         </span>
@@ -167,28 +186,61 @@ function TestCaseRow({ testCase, isLast }) {
           gap: 12,
           background: "rgba(255,255,255,0.015)",
         }}>
-          {testCase.description && (
-            <DetailField label="Description" value={testCase.description} />
-          )}
-          {testCase.preconditions && (
-            <DetailField label="Preconditions" value={testCase.preconditions} />
-          )}
-          {steps.length > 0 && (
-            <div>
-              <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                Steps
+          {editMode ? (
+            <>
+              <div>
+                <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Priority</div>
+                <select value={testCase.priority || "Medium"} onChange={e => onChange("priority", e.target.value)} style={styles.editSelect}>
+                  {["Critical", "High", "Medium", "Low"].map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
               </div>
-              <ol style={{ margin: 0, paddingLeft: 20 }}>
-                {steps.map((step, i) => (
-                  <li key={i} style={{ fontSize: 13, color: "#B8B0CC", marginBottom: 4, lineHeight: 1.55 }}>
-                    {step.replace(/^\d+\.\s*/, "")}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
-          {testCase.expected_result && (
-            <DetailField label="Expected Result" value={testCase.expected_result} />
+              <div>
+                <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Category</div>
+                <input type="text" value={testCase.category || ""} onChange={e => onChange("category", e.target.value)} style={styles.editInput} placeholder="e.g. Functional" />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Description</div>
+                <textarea rows={3} value={testCase.description || ""} onChange={e => onChange("description", e.target.value)} style={styles.editTextarea} placeholder="Describe the test case..." />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Preconditions</div>
+                <textarea rows={2} value={testCase.preconditions || ""} onChange={e => onChange("preconditions", e.target.value)} style={styles.editTextarea} placeholder="Preconditions..." />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Steps</div>
+                <textarea rows={5} value={testCase.steps || ""} onChange={e => onChange("steps", e.target.value)} style={styles.editTextarea} placeholder={"1. Step one\n2. Step two"} />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Expected Result</div>
+                <textarea rows={2} value={testCase.expected_result || ""} onChange={e => onChange("expected_result", e.target.value)} style={styles.editTextarea} placeholder="Expected result..." />
+              </div>
+            </>
+          ) : (
+            <>
+              {testCase.description && (
+                <DetailField label="Description" value={testCase.description} />
+              )}
+              {testCase.preconditions && (
+                <DetailField label="Preconditions" value={testCase.preconditions} />
+              )}
+              {steps.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                    Steps
+                  </div>
+                  <ol style={{ margin: 0, paddingLeft: 20 }}>
+                    {steps.map((step, i) => (
+                      <li key={i} style={{ fontSize: 13, color: "#B8B0CC", marginBottom: 4, lineHeight: 1.55 }}>
+                        {step.replace(/^\d+\.\s*/, "")}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+              {testCase.expected_result && (
+                <DetailField label="Expected Result" value={testCase.expected_result} />
+              )}
+            </>
           )}
         </div>
       )}
@@ -198,7 +250,7 @@ function TestCaseRow({ testCase, isLast }) {
 
 // ── SectionCard ───────────────────────────────────────────────────────────────
 
-function SectionCard({ section, defaultExpanded, isLast }) {
+function SectionCard({ section, defaultExpanded, isLast, sectionIdx, editMode, onTestCaseChange }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const tests = section.test_cases || [];
 
@@ -253,6 +305,10 @@ function SectionCard({ section, defaultExpanded, isLast }) {
               key={tc.id || i}
               testCase={tc}
               isLast={i === tests.length - 1}
+              sectionIdx={sectionIdx}
+              testCaseIdx={i}
+              editMode={editMode}
+              onTestCaseChange={onTestCaseChange}
             />
           ))}
         </div>
@@ -263,8 +319,12 @@ function SectionCard({ section, defaultExpanded, isLast }) {
 
 // ── TestSuiteViewer ───────────────────────────────────────────────────────────
 
-function TestSuiteViewer({ testSuite, crawlData, onDownloadXlsx, isDownloading, suiteId, onCopyLink, linkCopied }) {
-  const totalTests = (testSuite.sections || []).reduce((sum, s) => sum + (s.test_cases || []).length, 0);
+function TestSuiteViewer({
+  testSuite, crawlData, onDownloadXlsx, isDownloading, suiteId, onCopyLink, linkCopied,
+  canEdit, editMode, editedSuite, isSaving, saveError, onEnterEdit, onCancelEdit, onSaveEdit, onTestCaseChange,
+}) {
+  const activeSuite = editMode ? editedSuite : testSuite;
+  const totalTests = (activeSuite.sections || []).reduce((sum, s) => sum + (s.test_cases || []).length, 0);
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -281,58 +341,82 @@ function TestSuiteViewer({ testSuite, crawlData, onDownloadXlsx, isDownloading, 
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <h2 style={{ fontSize: 17, fontWeight: 700, color: "#E2C4FF", margin: "0 0 5px" }}>
-            {testSuite.site_name} — Test Suite
+            {activeSuite.site_name} — Test Suite
           </h2>
-          <div style={{ fontSize: 12, color: "#7777AA", marginBottom: testSuite.summary ? 10 : 0 }}>
+          <div style={{ fontSize: 12, color: "#7777AA", marginBottom: activeSuite.summary ? 10 : 0 }}>
             {crawlData?.pages_crawled} page{crawlData?.pages_crawled !== 1 ? "s" : ""} crawled
-            &nbsp;·&nbsp;{(testSuite.sections || []).length} sections
+            &nbsp;·&nbsp;{(activeSuite.sections || []).length} sections
             &nbsp;·&nbsp;{totalTests} test cases
           </div>
-          {testSuite.summary && (
+          {activeSuite.summary && (
             <p style={{ fontSize: 13, color: "#9090A8", margin: 0, lineHeight: 1.55, maxWidth: 560 }}>
-              {testSuite.summary}
+              {activeSuite.summary}
             </p>
           )}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end", flexShrink: 0 }}>
-          <button
-            onClick={onDownloadXlsx}
-            disabled={isDownloading}
-            style={{
-              background: isDownloading ? "rgba(124,58,237,0.2)" : "linear-gradient(135deg,#7C3AED,#5B21B6)",
-              color: "#fff",
-              border: "none",
-              borderRadius: 9,
-              padding: "10px 18px",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: isDownloading ? "not-allowed" : "pointer",
-              whiteSpace: "nowrap",
-              opacity: isDownloading ? 0.6 : 1,
-              fontFamily: "inherit",
-              transition: "opacity 0.15s",
-            }}
-          >
-            {isDownloading ? "Preparing…" : "⬇ Download .xlsx"}
-          </button>
-          {suiteId && (
-            <button
-              onClick={onCopyLink}
-              style={{
-                background: "none",
-                border: "1px solid rgba(192,132,252,0.25)",
-                borderRadius: 7,
-                padding: "6px 12px",
-                fontSize: 11,
-                color: linkCopied ? "#86EFAC" : "#9070C0",
-                cursor: "pointer",
-                fontFamily: "inherit",
-                whiteSpace: "nowrap",
-                transition: "color 0.15s",
-              }}
-            >
-              {linkCopied ? "✓ Link copied" : "🔗 Copy link"}
-            </button>
+          {/* Edit mode controls */}
+          {canEdit && !editMode && (
+            <button onClick={onEnterEdit} style={styles.editBtn}>✏ Edit</button>
+          )}
+          {editMode && (
+            <>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={onSaveEdit} disabled={isSaving} style={{ ...styles.saveBtn, opacity: isSaving ? 0.6 : 1, cursor: isSaving ? "not-allowed" : "pointer" }}>
+                  {isSaving ? "Saving…" : "Save changes"}
+                </button>
+                <button onClick={onCancelEdit} disabled={isSaving} style={styles.cancelEditBtn}>
+                  Cancel
+                </button>
+              </div>
+              {saveError && (
+                <p style={{ fontSize: 11, color: "#FF8080", margin: 0, textAlign: "right" }}>{saveError}</p>
+              )}
+            </>
+          )}
+          {/* Download / copy link (hidden in edit mode) */}
+          {!editMode && (
+            <>
+              <button
+                onClick={onDownloadXlsx}
+                disabled={isDownloading}
+                style={{
+                  background: isDownloading ? "rgba(124,58,237,0.2)" : "linear-gradient(135deg,#7C3AED,#5B21B6)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 9,
+                  padding: "10px 18px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: isDownloading ? "not-allowed" : "pointer",
+                  whiteSpace: "nowrap",
+                  opacity: isDownloading ? 0.6 : 1,
+                  fontFamily: "inherit",
+                  transition: "opacity 0.15s",
+                }}
+              >
+                {isDownloading ? "Preparing…" : "⬇ Download .xlsx"}
+              </button>
+              {suiteId && (
+                <button
+                  onClick={onCopyLink}
+                  style={{
+                    background: "none",
+                    border: "1px solid rgba(192,132,252,0.25)",
+                    borderRadius: 7,
+                    padding: "6px 12px",
+                    fontSize: 11,
+                    color: linkCopied ? "#86EFAC" : "#9070C0",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    whiteSpace: "nowrap",
+                    transition: "color 0.15s",
+                  }}
+                >
+                  {linkCopied ? "✓ Link copied" : "🔗 Copy link"}
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -344,15 +428,79 @@ function TestSuiteViewer({ testSuite, crawlData, onDownloadXlsx, isDownloading, 
         borderRadius: "0 0 14px 14px",
         overflow: "hidden",
       }}>
-        {(testSuite.sections || []).map((section, i) => (
+        {(activeSuite.sections || []).map((section, i) => (
           <SectionCard
             key={section.source_url || i}
             section={section}
             defaultExpanded={i === 0}
-            isLast={i === testSuite.sections.length - 1}
+            isLast={i === activeSuite.sections.length - 1}
+            sectionIdx={i}
+            editMode={editMode}
+            onTestCaseChange={onTestCaseChange}
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+
+function Dashboard({ suites, loading, error, onOpen, onNavigateHome }) {
+  return (
+    <div style={styles.dashboardWrap}>
+      <div style={styles.dashboardHeader}>
+        <button onClick={onNavigateHome} style={styles.dashboardBackBtn}>← Back</button>
+        <h2 style={styles.dashboardTitle}>My Test Suites</h2>
+      </div>
+
+      {loading && (
+        <div style={{ textAlign: "center", padding: "40px 0" }}>
+          <Spinner />
+        </div>
+      )}
+
+      {!loading && error && (
+        <div style={styles.errorCard} role="alert">
+          <span style={styles.errorIcon}>⚠</span>
+          <div style={{ flex: 1 }}>
+            <strong style={{ color: "#FF6B6B" }}>Could not load suites</strong>
+            <p style={styles.errorText}>{error}</p>
+          </div>
+        </div>
+      )}
+
+      {!loading && !error && suites !== null && suites.length === 0 && (
+        <div style={{ textAlign: "center", padding: "60px 24px", color: "#666" }}>
+          <p style={{ fontSize: 15, margin: "0 0 16px" }}>No suites yet — generate your first test suite.</p>
+          <button
+            onClick={onNavigateHome}
+            style={{ background: "linear-gradient(135deg,#7C3AED,#5B21B6)", color: "#fff", border: "none", borderRadius: 9, padding: "10px 24px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+          >
+            Generate a Suite →
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && suites && suites.length > 0 && (
+        <div style={styles.dashboardTable}>
+          {suites.map((s, idx) => (
+            <div key={s.id} style={{ ...styles.dashboardRow, borderBottom: idx === suites.length - 1 ? "none" : "1px solid rgba(255,255,255,0.05)" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={styles.dashboardSiteName}>{s.site_name || "Untitled"}</div>
+                <div style={styles.dashboardMeta}>{s.base_url}</div>
+              </div>
+              <div style={styles.dashboardDate}>
+                {new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              </div>
+              <button onClick={() => onOpen(s.id)} style={styles.dashboardActionBtn}>Open</button>
+              <a href={`${API_BASE}/api/suites/${s.id}/xlsx`} download style={styles.dashboardDownloadLink}>
+                ⬇ xlsx
+              </a>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -523,6 +671,21 @@ export default function App() {
   const [linkCopied, setLinkCopied]       = useState(false);
   const abortRef = useRef(null);
 
+  // ── Routing state ────────────────────────────────────────────────────────────
+  const [currentPage, setCurrentPage] = useState("home"); // "home" | "dashboard"
+
+  // ── Dashboard state ──────────────────────────────────────────────────────────
+  const [dashboardSuites, setDashboardSuites] = useState(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardError, setDashboardError]   = useState("");
+
+  // ── Edit mode state ──────────────────────────────────────────────────────────
+  const [editMode, setEditMode]       = useState(false);
+  const [editedSuite, setEditedSuite] = useState(null);
+  const [suiteOwnerId, setSuiteOwnerId] = useState(null);
+  const [isSaving, setIsSaving]       = useState(false);
+  const [saveError, setSaveError]     = useState("");
+
   // ── Supabase auth listener (runs before suite loader — order matters) ────────
   useEffect(() => {
     if (!supabase) return;
@@ -560,6 +723,7 @@ export default function App() {
         setTestSuiteData(data.test_suite);
         setSubmittedUrl(data.base_url || "");
         setSuiteId(sharedId);
+        setSuiteOwnerId(data.user_id || null);
         setPhase("done");
       })
       .catch(() => {
@@ -568,6 +732,19 @@ export default function App() {
         window.history.replaceState({}, "", "/");
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Client-side routing (no react-router) ────────────────────────────────────
+  useEffect(() => {
+    if (window.location.pathname === "/dashboard") setCurrentPage("dashboard");
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    function onPopState() {
+      setCurrentPage(window.location.pathname === "/dashboard" ? "dashboard" : "home");
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   const isActive = phase === "crawling" || phase === "generating";
 
@@ -663,6 +840,7 @@ export default function App() {
       setTestSuiteData(data.test_suite);
       if (data.suite_id) {
         setSuiteId(data.suite_id);
+        setSuiteOwnerId(user?.id || null);
         window.history.pushState({}, "", `/?suite=${data.suite_id}`);
       }
       setPhase("done");
@@ -728,7 +906,115 @@ export default function App() {
     setIsDownloading(false);
     setSubmittedUrl("");
     setLinkCopied(false);
+    setEditMode(false);
+    setEditedSuite(null);
+    setSuiteOwnerId(null);
+    setSaveError("");
     window.history.replaceState({}, "", "/");
+  }
+
+  // ── Navigation ───────────────────────────────────────────────────────────────
+
+  function navigateTo(page) {
+    if (page === "dashboard") {
+      window.history.pushState({}, "", "/dashboard");
+      setCurrentPage("dashboard");
+      if (phase !== "idle") handleReset();
+    } else {
+      window.history.pushState({}, "", "/");
+      setCurrentPage("home");
+    }
+  }
+
+  // ── Dashboard loader ─────────────────────────────────────────────────────────
+
+  async function loadDashboard() {
+    if (!supabase || !user) return;
+    setDashboardLoading(true);
+    setDashboardError("");
+    try {
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`${API_BASE}/api/suites`, { headers: authHeaders });
+      if (res.status === 401) { setDashboardError("Please sign in to view your dashboard."); return; }
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const data = await res.json();
+      setDashboardSuites(data.suites || []);
+    } catch (err) {
+      setDashboardError(err.message || "Could not load suites.");
+    } finally {
+      setDashboardLoading(false);
+    }
+  }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (currentPage === "dashboard" && user) loadDashboard(); }, [currentPage, user]);
+
+  // ── Open suite from dashboard ─────────────────────────────────────────────────
+
+  async function handleOpenSuite(id) {
+    navigateTo("home");
+    setPhase("generating");
+    try {
+      const res = await fetch(`${API_BASE}/api/suites/${id}`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setCrawlData(data.crawl_data);
+      setTestSuiteData(data.test_suite);
+      setSubmittedUrl(data.base_url || "");
+      setSuiteId(id);
+      setSuiteOwnerId(data.user_id || null);
+      setPhase("done");
+      window.history.pushState({}, "", `/?suite=${id}`);
+    } catch {
+      setError("Could not load the suite.");
+      setPhase("error");
+    }
+  }
+
+  // ── Edit mode handlers ───────────────────────────────────────────────────────
+
+  function handleEnterEdit() {
+    setEditedSuite(JSON.parse(JSON.stringify(testSuiteData)));
+    setEditMode(true);
+    setSaveError("");
+  }
+
+  function handleCancelEdit() {
+    setEditedSuite(null);
+    setEditMode(false);
+    setSaveError("");
+  }
+
+  async function handleSaveEdit() {
+    if (!suiteId || !editedSuite) return;
+    setIsSaving(true);
+    setSaveError("");
+    try {
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`${API_BASE}/api/suites/${suiteId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({ test_suite: editedSuite }),
+      });
+      if (res.status === 403) throw new Error("You don't have permission to edit this suite.");
+      if (res.status === 401) throw new Error("Please sign in to save changes.");
+      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.detail || `Error ${res.status}`); }
+      setTestSuiteData(editedSuite);
+      setEditedSuite(null);
+      setEditMode(false);
+    } catch (err) {
+      setSaveError(err.message || "Save failed. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function handleTestCaseChange(sectionIdx, caseIdx, field, value) {
+    setEditedSuite(prev => {
+      const next = JSON.parse(JSON.stringify(prev));
+      next.sections[sectionIdx].test_cases[caseIdx][field] = value;
+      return next;
+    });
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -779,6 +1065,23 @@ export default function App() {
           Sign in
         </button>
       )}
+
+      {/* My Suites button (signed in) */}
+      {supabase && user && (
+        <button onClick={() => navigateTo("dashboard")} style={styles.mySuitesBtn} className="sg-auth-btn">
+          My Suites
+        </button>
+      )}
+
+      {currentPage === "dashboard" ? (
+        <Dashboard
+          suites={dashboardSuites}
+          loading={dashboardLoading}
+          error={dashboardError}
+          onOpen={handleOpenSuite}
+          onNavigateHome={() => navigateTo("home")}
+        />
+      ) : (
 
       <main style={styles.main}>
         {/* Header */}
@@ -1007,6 +1310,15 @@ export default function App() {
             suiteId={suiteId}
             onCopyLink={handleCopyLink}
             linkCopied={linkCopied}
+            canEdit={!!(suiteId && user && suiteOwnerId && user.id === suiteOwnerId)}
+            editMode={editMode}
+            editedSuite={editedSuite}
+            isSaving={isSaving}
+            saveError={saveError}
+            onEnterEdit={handleEnterEdit}
+            onCancelEdit={handleCancelEdit}
+            onSaveEdit={handleSaveEdit}
+            onTestCaseChange={handleTestCaseChange}
           />
         )}
 
@@ -1027,6 +1339,8 @@ export default function App() {
           </div>
         )}
       </main>
+
+      )} {/* end dashboard/home conditional */}
 
       {/* Footer */}
       <footer style={styles.footer}>
@@ -1476,6 +1790,193 @@ const styles = {
     fontSize: 11,
     color: "#444",
     margin: "8px 0 0",
+  },
+
+  // My Suites button
+  mySuitesBtn: {
+    position: "fixed",
+    top: 16,
+    right: 240,
+    zIndex: 10,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    color: "#C084FC",
+    fontSize: 13,
+    padding: "6px 12px",
+    borderRadius: 8,
+    background: "rgba(124,58,237,0.1)",
+    border: "1px solid rgba(192,132,252,0.25)",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    transition: "color 0.15s, background 0.15s",
+  },
+
+  // Edit mode buttons (viewer header)
+  editBtn: {
+    background: "rgba(124,58,237,0.15)",
+    border: "1px solid rgba(192,132,252,0.3)",
+    color: "#C084FC",
+    borderRadius: 8,
+    padding: "8px 14px",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    whiteSpace: "nowrap",
+  },
+  saveBtn: {
+    background: "linear-gradient(135deg,#7C3AED,#5B21B6)",
+    border: "none",
+    color: "#fff",
+    borderRadius: 8,
+    padding: "8px 16px",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    whiteSpace: "nowrap",
+  },
+  cancelEditBtn: {
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.1)",
+    color: "#888",
+    borderRadius: 8,
+    padding: "8px 14px",
+    fontSize: 12,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    whiteSpace: "nowrap",
+  },
+
+  // Inline edit controls
+  editInput: {
+    flex: 1,
+    background: "rgba(255,255,255,0.07)",
+    border: "1px solid rgba(192,132,252,0.25)",
+    borderRadius: 6,
+    color: "#E2C4FF",
+    padding: "5px 9px",
+    fontSize: 13,
+    fontFamily: "inherit",
+    outline: "none",
+    width: "100%",
+    boxSizing: "border-box",
+  },
+  editTextarea: {
+    background: "rgba(255,255,255,0.07)",
+    border: "1px solid rgba(192,132,252,0.25)",
+    borderRadius: 6,
+    color: "#E2C4FF",
+    padding: "7px 9px",
+    fontSize: 13,
+    fontFamily: "inherit",
+    outline: "none",
+    width: "100%",
+    resize: "vertical",
+    lineHeight: 1.5,
+    boxSizing: "border-box",
+  },
+  editSelect: {
+    background: "rgba(255,255,255,0.07)",
+    border: "1px solid rgba(192,132,252,0.25)",
+    borderRadius: 6,
+    color: "#E2C4FF",
+    padding: "5px 9px",
+    fontSize: 13,
+    fontFamily: "inherit",
+    outline: "none",
+  },
+
+  // Dashboard
+  dashboardWrap: {
+    position: "relative",
+    zIndex: 1,
+    maxWidth: 880,
+    margin: "0 auto",
+    padding: "64px 24px 80px",
+  },
+  dashboardHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: 16,
+    marginBottom: 28,
+  },
+  dashboardBackBtn: {
+    background: "none",
+    border: "none",
+    color: "#888",
+    fontSize: 13,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    padding: 0,
+  },
+  dashboardTitle: {
+    fontSize: 20,
+    fontWeight: 700,
+    color: "#D0C0F0",
+    margin: 0,
+  },
+  dashboardTable: {
+    display: "flex",
+    flexDirection: "column",
+    border: "1px solid rgba(255,255,255,0.07)",
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+  dashboardRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "14px 20px",
+    background: "rgba(255,255,255,0.02)",
+  },
+  dashboardSiteName: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#D0C0F0",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  dashboardMeta: {
+    fontSize: 11,
+    color: "#555",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  dashboardDate: {
+    fontSize: 11,
+    color: "#666",
+    flexShrink: 0,
+    minWidth: 80,
+    textAlign: "right",
+  },
+  dashboardActionBtn: {
+    background: "rgba(124,58,237,0.15)",
+    border: "1px solid rgba(192,132,252,0.25)",
+    color: "#C084FC",
+    borderRadius: 7,
+    padding: "6px 14px",
+    fontSize: 12,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+  },
+  dashboardDownloadLink: {
+    background: "none",
+    border: "1px solid rgba(255,255,255,0.1)",
+    color: "#888",
+    borderRadius: 7,
+    padding: "6px 10px",
+    fontSize: 12,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    flexShrink: 0,
+    textDecoration: "none",
+    whiteSpace: "nowrap",
   },
 };
 

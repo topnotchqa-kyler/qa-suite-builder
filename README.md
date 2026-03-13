@@ -12,6 +12,8 @@ Generate a comprehensive, structured QA test suite for any website — powered b
 4. **Review** — The site architecture card shows total URLs, template families, and pages selected before generation begins. You can inspect what was found and decide whether to proceed.
 5. **Generate** — Claude produces test cases grounded in the actual UI: real field names, real interactions, template-aware framing for repeated page types.
 6. **Browse & export** — Test cases are displayed inline, grouped by page section, with expandable detail panels. A shareable link and `.xlsx` download are available from the viewer.
+7. **Edit** — Signed-in users can edit any test case inline (title, priority, category, description, preconditions, steps, expected result). Every save snapshots the previous version automatically.
+8. **Dashboard** — `/dashboard` lists all suites saved under your account with one-click open and direct `.xlsx` download.
 
 ### Two-step UI flow
 
@@ -113,6 +115,7 @@ Environment variables required:
 Create a free [Supabase](https://supabase.com) project and run the following migration in the SQL editor:
 
 ```sql
+-- Phase 1: test suite storage + user association
 create table test_suites (
   id           uuid primary key default gen_random_uuid(),
   created_at   timestamptz not null default now(),
@@ -127,6 +130,17 @@ create table test_suites (
 create index on test_suites (created_at desc);
 create index on test_suites (environment);
 create index on test_suites (user_id) where user_id is not null;
+
+-- Phase 2: version snapshots (one row captured before each inline edit save)
+create table test_suite_versions (
+  id             uuid primary key default gen_random_uuid(),
+  suite_id       uuid not null references test_suites(id) on delete cascade,
+  version_number int  not null,
+  test_suite     jsonb not null,
+  created_at     timestamptz not null default now()
+);
+
+create index on test_suite_versions (suite_id, version_number desc);
 ```
 
 Use the **service role** key (not the anon key) for the backend so it can write without RLS getting in the way.
@@ -230,7 +244,13 @@ qa-suite-builder/
 │   ├── Dockerfile           # Backend-only Dockerfile
 │   ├── requirements.txt
 │   ├── requirements-dev.txt # Test dependencies (pytest — not installed in Railway)
-│   ├── tests/               # pytest unit tests
+│   ├── tests/               # pytest unit tests (78 tests)
+│   │   ├── conftest.py
+│   │   ├── test_auth.py
+│   │   ├── test_crawler_utils.py
+│   │   ├── test_generation_utils.py
+│   │   ├── test_main_utils.py
+│   │   └── test_patch_endpoint.py   # PATCH /api/suites/{id} security tests
 │   └── .env.example
 └── frontend/
     ├── App.jsx              # Main React component (all UI + inline styles)
@@ -246,17 +266,18 @@ qa-suite-builder/
 
 ## API Endpoints
 
-| Method | Path | Rate limit | Description |
-|--------|------|------------|-------------|
-| `GET`  | `/health` | — | Health check |
-| `POST` | `/api/crawl` | 20/hr per IP | Crawl only — returns raw JSON including `site_architecture` |
-| `POST` | `/api/generate` | 10/hr per IP | Full pipeline → `.xlsx` download |
-| `POST` | `/api/generate?format=json` | 10/hr per IP | Full pipeline → JSON (skips xlsx build, fast for iteration) |
-| `POST` | `/api/generate-from-crawl` | 10/hr per IP | Generate from existing crawl data → `.xlsx` download |
-| `POST` | `/api/generate-from-crawl?format=json` | 10/hr per IP | Generate from existing crawl data → JSON (used by inline viewer) |
-| `GET`  | `/api/suites` | — | List the 20 most recent saved suites (metadata only) |
-| `GET`  | `/api/suites/{id}` | — | Fetch a saved suite by UUID — returns `crawl_data` + `test_suite` |
-| `GET`  | `/api/suites/{id}/xlsx` | — | Build and download `.xlsx` for a saved suite — no AI call |
+| Method | Path | Auth | Rate limit | Description |
+|--------|------|------|------------|-------------|
+| `GET`    | `/health` | — | — | Health check |
+| `POST`   | `/api/crawl` | — | 20/hr per IP | Crawl only — returns raw JSON including `site_architecture` |
+| `POST`   | `/api/generate` | — | 10/hr per IP | Full pipeline → `.xlsx` download |
+| `POST`   | `/api/generate?format=json` | — | 10/hr per IP | Full pipeline → JSON (skips xlsx build, fast for iteration) |
+| `POST`   | `/api/generate-from-crawl` | optional | 10/hr per IP | Generate from existing crawl data → `.xlsx` download |
+| `POST`   | `/api/generate-from-crawl?format=json` | optional | 10/hr per IP | Generate from existing crawl data → JSON (used by inline viewer) |
+| `GET`    | `/api/suites` | **required** | — | List the 20 most recent suites owned by the authenticated user |
+| `GET`    | `/api/suites/{id}` | — | — | Fetch a saved suite by UUID — returns `crawl_data` + `test_suite` |
+| `GET`    | `/api/suites/{id}/xlsx` | — | — | Build and download `.xlsx` for a saved suite — no AI call |
+| `PATCH`  | `/api/suites/{id}` | **required** | — | Edit a suite's `test_suite` JSON — snapshots old version first, enforces ownership |
 
 ### Request body (`/api/crawl`, `/api/generate`)
 

@@ -23,11 +23,11 @@ import io
 
 load_dotenv()
 
-from auth import get_optional_user_id
+from auth import get_optional_user_id, get_required_user_id
 from crawler import crawl_site
 from generation import generate_test_suite
 from xlsx_builder import build_workbook
-from storage import save_suite, get_suite, list_suites
+from storage import save_suite, get_suite, list_suites, snapshot_version, update_suite_test_suite
 
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,10 @@ class CrawlOnlyRequest(BaseModel):
     url: str
     username: Optional[str] = None
     password: Optional[str] = None
+
+
+class PatchSuiteRequest(BaseModel):
+    test_suite: dict
 
 
 def _validate_url(url: str) -> None:
@@ -254,14 +258,61 @@ async def generate_from_crawl_endpoint(
 
 
 @app.get("/api/suites")
-async def list_suites_endpoint():
-    """Return the 20 most recently generated suites (metadata only)."""
+async def list_suites_endpoint(
+    user_id: str = Depends(get_required_user_id),
+):
+    """Return the 20 most recent suites owned by the authenticated user. Requires JWT."""
     try:
-        suites = await asyncio.to_thread(list_suites)
+        suites = await asyncio.to_thread(list_suites, user_id)
         return JSONResponse(content={"suites": suites})
     except Exception:
-        logger.exception("List suites error")
+        logger.exception("List suites error for user: %s", user_id)
         raise HTTPException(status_code=500, detail="Could not retrieve suites.")
+
+
+@app.patch("/api/suites/{suite_id}")
+async def patch_suite_endpoint(
+    suite_id: str,
+    body: PatchSuiteRequest,
+    user_id: str = Depends(get_required_user_id),
+):
+    """
+    Edit a suite's test_suite. Requires JWT + ownership.
+    Snapshots the current test_suite to test_suite_versions before overwriting.
+    Returns {suite_id, version_number}.
+    """
+    # 1. Fetch current suite
+    try:
+        suite = await asyncio.to_thread(get_suite, suite_id)
+    except Exception:
+        logger.exception("Get suite error during PATCH for id: %s", suite_id)
+        raise HTTPException(status_code=500, detail="Could not retrieve suite.")
+    if not suite:
+        raise HTTPException(status_code=404, detail="Suite not found.")
+
+    # 2. Ownership check — security gate (suite with user_id=None is also uneditable)
+    if suite.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to edit this suite.")
+
+    # 3. Snapshot current version — abort if fails (unsafe to overwrite without snapshot)
+    try:
+        version_number = await asyncio.to_thread(
+            snapshot_version, suite_id, suite["test_suite"]
+        )
+    except Exception:
+        logger.exception("Snapshot failed for suite: %s", suite_id)
+        raise HTTPException(status_code=500, detail="Could not snapshot suite before update.")
+
+    # 4. Write new test_suite
+    try:
+        await asyncio.to_thread(update_suite_test_suite, suite_id, body.test_suite)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Suite not found.")
+    except Exception:
+        logger.exception("Update suite error for id: %s", suite_id)
+        raise HTTPException(status_code=500, detail="Could not update suite.")
+
+    return JSONResponse(content={"suite_id": suite_id, "version_number": version_number})
 
 
 @app.get("/api/suites/{suite_id}")

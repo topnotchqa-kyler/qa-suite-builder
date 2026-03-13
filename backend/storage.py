@@ -67,17 +67,62 @@ def get_suite(suite_id: str) -> Optional[dict]:
     return result.data if result.data else None
 
 
-def list_suites(limit: int = 20) -> list:
+def list_suites(user_id: str, limit: int = 20) -> list:
     """
-    Return the most recent suites, newest first.
+    Return the authenticated user's most recent suites, newest first.
     Only returns metadata columns (no crawl_data / test_suite blobs).
     """
     client = _get_client()
     result = (
         client.table("test_suites")
-        .select("id, base_url, site_name, created_at")
+        .select("id, base_url, site_name, created_at, environment")
+        .eq("user_id", user_id)
         .order("created_at", desc=True)
         .limit(limit)
         .execute()
     )
     return result.data
+
+
+def snapshot_version(suite_id: str, current_test_suite: dict) -> int:
+    """
+    Capture the current test_suite as a version snapshot before an edit overwrites it.
+    Returns the new version_number (1-based, monotonically increasing per suite).
+
+    This is NOT best-effort. Callers must abort the PATCH if this raises —
+    overwriting without a snapshot would silently destroy history.
+    """
+    client = _get_client()
+    result = (
+        client.table("test_suite_versions")
+        .select("version_number")
+        .eq("suite_id", suite_id)
+        .order("version_number", desc=True)
+        .limit(1)
+        .execute()
+    )
+    prev = result.data[0]["version_number"] if result.data else 0
+    next_version = prev + 1
+    client.table("test_suite_versions").insert({
+        "suite_id":       suite_id,
+        "version_number": next_version,
+        "test_suite":     current_test_suite,
+    }).execute()
+    return next_version
+
+
+def update_suite_test_suite(suite_id: str, test_suite: dict) -> None:
+    """
+    Overwrite the test_suite JSONB column for an existing suite.
+    Does not touch crawl_data, user_id, or any other column.
+    Raises ValueError if suite_id is not found or update returns no rows.
+    """
+    client = _get_client()
+    result = (
+        client.table("test_suites")
+        .update({"test_suite": test_suite})
+        .eq("id", suite_id)
+        .execute()
+    )
+    if not result.data:
+        raise ValueError(f"Suite {suite_id} not found or update returned no rows.")
