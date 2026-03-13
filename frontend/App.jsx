@@ -949,14 +949,15 @@ function SuiteExplorer({
       {/* Collapsible architecture info panel */}
       {infoOpen && (
         <div style={styles.archInfoPanel}>
+          {/* Summary — full-width row */}
+          {activeSuite.summary && (
+            <p style={{ fontSize: 13, color: "#9090A8", margin: 0, lineHeight: 1.6, padding: "14px 24px 0" }}>
+              {activeSuite.summary}
+            </p>
+          )}
           <div style={{ display: "flex", gap: 24, padding: "14px 24px 16px", alignItems: "flex-start" }}>
-            {/* Left: summary + crawl stats */}
+            {/* Left: crawl stats */}
             <div style={{ flex: "0 0 auto", maxWidth: 480, minWidth: 0 }}>
-              {activeSuite.summary && (
-                <p style={{ fontSize: 13, color: "#9090A8", margin: "0 0 14px", lineHeight: 1.6 }}>
-                  {activeSuite.summary}
-                </p>
-              )}
               {crawlData && <SiteArchitectureCard crawlData={crawlData} />}
             </div>
             {/* Right: sitemap diagram placeholder */}
