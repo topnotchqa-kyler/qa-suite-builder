@@ -9,7 +9,8 @@ import os
 import anthropic
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
+SUGGEST_MODEL = "claude-haiku-4-5-20251001"
 
 
 def generate_test_suite(crawl_data: dict, api_key: str = None) -> dict:
@@ -310,5 +311,61 @@ def _build_page_context(page: dict) -> str:
         if vs_lines:
             lines.append("Tab/Accordion panels revealed:")
             lines.extend(vs_lines)
+
+    return "\n".join(lines)
+
+
+def generate_field_suggestion(
+    field: str,
+    current_value: str,
+    context: dict,
+    api_key: str = None,
+) -> str:
+    """
+    Generate a short inline suggestion to continue `current_value` in `field`.
+
+    Uses SUGGEST_MODEL (Haiku) for speed and cost efficiency.
+    Returns a plain string continuation — not a repeat of current_value.
+    Raises ValueError if no API key is available.
+    """
+    resolved_key = api_key or ANTHROPIC_API_KEY
+    if not resolved_key:
+        raise ValueError("No Anthropic API key provided. Pass an API key in the X-Api-Key header.")
+
+    client = anthropic.Anthropic(api_key=resolved_key)
+
+    field_guidance = {
+        "description":     "what this test case validates and why",
+        "preconditions":   "the state the system must be in before this test runs",
+        "steps":           "numbered step-by-step actions a tester should perform",
+        "expected_result": "the observable outcome that indicates the test has passed",
+    }
+    guidance = field_guidance.get(field, "the field content")
+    ctx = context or {}
+
+    prompt = f"""You are helping a QA engineer write a test case. Continue the text below naturally.
+
+Test case context:
+  Title: {ctx.get('title', '')}
+  Priority: {ctx.get('priority', '')}
+  Category: {ctx.get('category', '')}
+  Description: {ctx.get('description', '') if field != 'description' else '(being written)'}
+  Preconditions: {ctx.get('preconditions', '') if field != 'preconditions' else '(being written)'}
+  Steps: {ctx.get('steps', '') if field != 'steps' else '(being written)'}
+  Expected Result: {ctx.get('expected_result', '') if field != 'expected_result' else '(being written)'}
+
+Field being written: {field} — this should express {guidance}.
+
+Text so far:
+{current_value}
+
+Continue the text naturally from where it ends. Write ONLY the continuation (do not repeat the existing text). Keep it concise — 1-3 sentences or steps maximum. No preamble."""
+
+    message = client.messages.create(
+        model=SUGGEST_MODEL,
+        max_tokens=150,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return message.content[0].text.strip()
 
     return "\n".join(lines)

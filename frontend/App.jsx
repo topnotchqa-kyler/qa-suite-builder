@@ -121,8 +121,16 @@ function SiteArchitectureCard({ crawlData }) {
 
 // ── TestCaseRow ───────────────────────────────────────────────────────────────
 
-function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTestCaseChange }) {
+function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTestCaseChange, apiKey }) {
   const [expanded, setExpanded] = useState(false);
+  const [suggestion, setSuggestion] = useState("");
+  const [suggestField, setSuggestField] = useState("");
+  const [isFetching, setIsFetching] = useState(false);
+  const [suggestError, setSuggestError] = useState("");
+  const errorTimerRef = useRef(null);
+  const debounceRef = useRef(null);
+  const abortRef = useRef(null);
+  const textareaRefs = useRef({});
   const steps = (testCase.steps || "").split("\n").filter(s => s.trim());
   const priorityStyle = PRIORITY_STYLE[testCase.priority] || PRIORITY_STYLE.Low;
 
@@ -130,14 +138,110 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
     if (editMode) setExpanded(true);
   }, [editMode]);
 
+  useEffect(() => {
+    return () => {
+      clearTimeout(debounceRef.current);
+      clearTimeout(errorTimerRef.current);
+      abortRef.current?.abort();
+    };
+  }, []);
+
   function onChange(field, value) {
     onTestCaseChange?.(sectionIdx, testCaseIdx, field, value);
   }
 
+  const SUGGEST_FIELDS = ["description", "preconditions", "steps", "expected_result"];
+
+  function handleFieldChange(field, value) {
+    onTestCaseChange?.(sectionIdx, testCaseIdx, field, value);
+    clearTimeout(debounceRef.current);
+    abortRef.current?.abort();
+    setSuggestion(""); setSuggestField("");
+    if (!apiKey || !SUGGEST_FIELDS.includes(field) || value.trim().length < 15) return;
+    debounceRef.current = setTimeout(() => fetchSuggestion(field, value), 400);
+  }
+
+  async function fetchSuggestion(field, value) {
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setIsFetching(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/ai-suggest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(apiKey ? { "X-Api-Key": apiKey } : {}) },
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          field,
+          current_value: value,
+          context: {
+            title: testCase.title || "",
+            priority: testCase.priority || "",
+            category: testCase.category || "",
+            description: testCase.description || "",
+            preconditions: testCase.preconditions || "",
+            steps: testCase.steps || "",
+            expected_result: testCase.expected_result || "",
+          },
+        }),
+      });
+      if (!res.ok) {
+        if (res.status === 401) {
+          setSuggestError("Invalid API key");
+          setSuggestField(field);
+          clearTimeout(errorTimerRef.current);
+          errorTimerRef.current = setTimeout(() => setSuggestError(""), 5000);
+        }
+        return;
+      }
+      const data = await res.json();
+      if (data.suggestion) { setSuggestion(data.suggestion); setSuggestField(field); }
+    } catch (err) {
+      if (err.name !== "AbortError") { /* silently suppress */ }
+    } finally { setIsFetching(false); }
+  }
+
+  function insertSuggestion(el, field) {
+    // Use execCommand so the insertion lands on the browser's undo stack (Cmd+Z works).
+    // Select any trailing whitespace first so we don't accumulate double spaces.
+    const trimmedLen = (testCase[field] || "").trimEnd().length;
+    try {
+      el.focus();
+      el.setSelectionRange(trimmedLen, el.value.length);
+      document.execCommand("insertText", false, " " + suggestion);
+    } catch {
+      // execCommand not available — fall back to direct state update (no undo support)
+      onTestCaseChange?.(sectionIdx, testCaseIdx, field, (testCase[field] || "").trimEnd() + " " + suggestion);
+    }
+    setSuggestion(""); setSuggestField("");
+  }
+
+  function handleTextareaKeyDown(e, field) {
+    if (e.key === "Tab" && suggestion && suggestField === field) {
+      e.preventDefault();
+      insertSuggestion(e.target, field);
+    }
+    if (e.key === "Escape" && suggestion) { setSuggestion(""); setSuggestField(""); }
+  }
+
+  function acceptSuggestion(field) {
+    const el = textareaRefs.current[field];
+    if (el) insertSuggestion(el, field);
+  }
+
   return (
     <div style={{ borderBottom: isLast ? "none" : "1px solid rgba(255,255,255,0.03)" }}>
-      <button
-        onClick={() => setExpanded(v => !v)}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={e => {
+          const tag = e.target.tagName;
+          if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(tag)) return;
+          setExpanded(v => !v);
+        }}
+        onKeyDown={e => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(v => !v); }
+        }}
         style={{
           width: "100%",
           display: "flex",
@@ -164,7 +268,6 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
             type="text"
             value={testCase.title || ""}
             onChange={e => onChange("title", e.target.value)}
-            onClick={e => e.stopPropagation()}
             style={styles.editInput}
             placeholder="Test case title"
           />
@@ -176,7 +279,7 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
         <span style={{ color: "#444", fontSize: 9, flexShrink: 0, marginLeft: 4 }}>
           {expanded ? "▲" : "▶"}
         </span>
-      </button>
+      </div>
 
       {expanded && (
         <div style={{
@@ -199,20 +302,67 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
                 <input type="text" value={testCase.category || ""} onChange={e => onChange("category", e.target.value)} style={styles.editInput} placeholder="e.g. Functional" />
               </div>
               <div>
-                <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Description</div>
-                <textarea rows={3} value={testCase.description || ""} onChange={e => onChange("description", e.target.value)} style={styles.editTextarea} placeholder="Describe the test case..." />
+                <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+                  Description
+                  {isFetching && suggestField !== "description" && !suggestion && <span style={{ marginLeft: 6, color: "#555", fontSize: 10 }}>●</span>}
+                </div>
+                <textarea rows={3} ref={el => { textareaRefs.current["description"] = el; }} value={testCase.description || ""} onChange={e => handleFieldChange("description", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "description")} style={styles.editTextarea} placeholder="Describe the test case..." />
+                {suggestion && suggestField === "description" && (
+                  <div style={styles.suggestionChip}>
+                    <span style={styles.suggestionText}>{suggestion}</span>
+                    <span style={styles.suggestionHint}>Tab to accept</span>
+                    <button style={styles.suggestionAcceptBtn} onMouseDown={e => e.preventDefault()} onClick={() => acceptSuggestion("description")}>✓ Accept</button>
+                    <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
+                  </div>
+                )}
+                {suggestError && suggestField === "description" && (
+                  <div style={styles.suggestErrorChip}>⚠ {suggestError}</div>
+                )}
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Preconditions</div>
-                <textarea rows={2} value={testCase.preconditions || ""} onChange={e => onChange("preconditions", e.target.value)} style={styles.editTextarea} placeholder="Preconditions..." />
+                <textarea rows={2} ref={el => { textareaRefs.current["preconditions"] = el; }} value={testCase.preconditions || ""} onChange={e => handleFieldChange("preconditions", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "preconditions")} style={styles.editTextarea} placeholder="Preconditions..." />
+                {suggestion && suggestField === "preconditions" && (
+                  <div style={styles.suggestionChip}>
+                    <span style={styles.suggestionText}>{suggestion}</span>
+                    <span style={styles.suggestionHint}>Tab to accept</span>
+                    <button style={styles.suggestionAcceptBtn} onMouseDown={e => e.preventDefault()} onClick={() => acceptSuggestion("preconditions")}>✓ Accept</button>
+                    <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
+                  </div>
+                )}
+                {suggestError && suggestField === "preconditions" && (
+                  <div style={styles.suggestErrorChip}>⚠ {suggestError}</div>
+                )}
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Steps</div>
-                <textarea rows={5} value={testCase.steps || ""} onChange={e => onChange("steps", e.target.value)} style={styles.editTextarea} placeholder={"1. Step one\n2. Step two"} />
+                <textarea rows={5} ref={el => { textareaRefs.current["steps"] = el; }} value={testCase.steps || ""} onChange={e => handleFieldChange("steps", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "steps")} style={styles.editTextarea} placeholder={"1. Step one\n2. Step two"} />
+                {suggestion && suggestField === "steps" && (
+                  <div style={styles.suggestionChip}>
+                    <span style={styles.suggestionText}>{suggestion}</span>
+                    <span style={styles.suggestionHint}>Tab to accept</span>
+                    <button style={styles.suggestionAcceptBtn} onMouseDown={e => e.preventDefault()} onClick={() => acceptSuggestion("steps")}>✓ Accept</button>
+                    <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
+                  </div>
+                )}
+                {suggestError && suggestField === "steps" && (
+                  <div style={styles.suggestErrorChip}>⚠ {suggestError}</div>
+                )}
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#777", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Expected Result</div>
-                <textarea rows={2} value={testCase.expected_result || ""} onChange={e => onChange("expected_result", e.target.value)} style={styles.editTextarea} placeholder="Expected result..." />
+                <textarea rows={2} ref={el => { textareaRefs.current["expected_result"] = el; }} value={testCase.expected_result || ""} onChange={e => handleFieldChange("expected_result", e.target.value)} onKeyDown={e => handleTextareaKeyDown(e, "expected_result")} style={styles.editTextarea} placeholder="Expected result..." />
+                {suggestion && suggestField === "expected_result" && (
+                  <div style={styles.suggestionChip}>
+                    <span style={styles.suggestionText}>{suggestion}</span>
+                    <span style={styles.suggestionHint}>Tab to accept</span>
+                    <button style={styles.suggestionAcceptBtn} onMouseDown={e => e.preventDefault()} onClick={() => acceptSuggestion("expected_result")}>✓ Accept</button>
+                    <button style={styles.suggestionDismissBtn} onClick={() => { setSuggestion(""); setSuggestField(""); }}>✕</button>
+                  </div>
+                )}
+                {suggestError && suggestField === "expected_result" && (
+                  <div style={styles.suggestErrorChip}>⚠ {suggestError}</div>
+                )}
               </div>
             </>
           ) : (
@@ -250,7 +400,7 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
 
 // ── SectionCard ───────────────────────────────────────────────────────────────
 
-function SectionCard({ section, defaultExpanded, isLast, sectionIdx, editMode, onTestCaseChange }) {
+function SectionCard({ section, defaultExpanded, isLast, sectionIdx, editMode, onTestCaseChange, apiKey }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const tests = section.test_cases || [];
 
@@ -309,6 +459,7 @@ function SectionCard({ section, defaultExpanded, isLast, sectionIdx, editMode, o
               testCaseIdx={i}
               editMode={editMode}
               onTestCaseChange={onTestCaseChange}
+              apiKey={apiKey}
             />
           ))}
         </div>
@@ -322,7 +473,7 @@ function SectionCard({ section, defaultExpanded, isLast, sectionIdx, editMode, o
 function TestSuiteViewer({
   testSuite, crawlData, onDownloadXlsx, isDownloading, suiteId, onCopyLink, linkCopied,
   canEdit, editMode, editedSuite, isSaving, saveError, onEnterEdit, onCancelEdit, onSaveEdit, onTestCaseChange,
-  snapshotInfo, onRestoreSnapshot, isRestoring,
+  snapshotInfo, onRestoreSnapshot, isRestoring, apiKey, onApiKeyChange,
 }) {
   const activeSuite = editMode ? editedSuite : testSuite;
   const totalTests = (activeSuite.sections || []).reduce((sum, s) => sum + (s.test_cases || []).length, 0);
@@ -373,6 +524,18 @@ function TestSuiteViewer({
               {saveError && (
                 <p style={{ fontSize: 11, color: "#FF8080", margin: 0, textAlign: "right" }}>{saveError}</p>
               )}
+              <div style={styles.inlineApiKeyRow}>
+                <span style={styles.inlineApiKeyLabel}>✦ AI key</span>
+                <input
+                  type="password"
+                  placeholder="sk-ant-… (for AI suggestions)"
+                  value={apiKey}
+                  onChange={e => onApiKeyChange?.(e.target.value)}
+                  style={styles.inlineApiKeyInput}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
             </>
           )}
           {/* Download / copy link (hidden in edit mode and snapshot view) */}
@@ -450,6 +613,7 @@ function TestSuiteViewer({
             key={section.source_url || i}
             section={section}
             defaultExpanded={i === 0}
+            apiKey={apiKey}
             isLast={i === activeSuite.sections.length - 1}
             sectionIdx={i}
             editMode={editMode}
@@ -1517,6 +1681,8 @@ export default function App() {
             snapshotInfo={viewingSnapshot}
             onRestoreSnapshot={handleRestoreFromViewer}
             isRestoring={isRestoring}
+            apiKey={apiKey}
+            onApiKeyChange={setApiKey}
           />
         )}
 
@@ -2243,6 +2409,87 @@ const styles = {
     fontFamily: "inherit",
     whiteSpace: "nowrap",
     flexShrink: 0,
+  },
+  // ── AI suggestion chip ──────────────────────────────────────────────────────
+  suggestionChip: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 8,
+    marginTop: 4,
+    padding: "6px 10px",
+    background: "rgba(124,58,237,0.08)",
+    border: "1px solid rgba(192,132,252,0.2)",
+    borderRadius: 6,
+    fontSize: 12,
+  },
+  suggestionText: {
+    flex: 1,
+    color: "#9080BA",
+    fontStyle: "italic",
+    lineHeight: 1.5,
+    wordBreak: "break-word",
+  },
+  suggestionHint: {
+    color: "#555",
+    fontSize: 11,
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
+  suggestionAcceptBtn: {
+    background: "rgba(124,58,237,0.2)",
+    border: "1px solid rgba(192,132,252,0.3)",
+    borderRadius: 5,
+    color: "#C084FC",
+    fontSize: 11,
+    fontWeight: 600,
+    padding: "2px 8px",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
+  suggestionDismissBtn: {
+    background: "none",
+    border: "none",
+    color: "#555",
+    fontSize: 12,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    padding: "2px 4px",
+    flexShrink: 0,
+  },
+  suggestErrorChip: {
+    marginTop: 4,
+    padding: "5px 10px",
+    background: "rgba(239,68,68,0.08)",
+    border: "1px solid rgba(239,68,68,0.2)",
+    borderRadius: 6,
+    fontSize: 12,
+    color: "#F87171",
+  },
+  inlineApiKeyRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 2,
+  },
+  inlineApiKeyLabel: {
+    fontSize: 11,
+    color: "#555",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
+  inlineApiKeyInput: {
+    flex: 1,
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 6,
+    color: "#C8C0D8",
+    fontSize: 12,
+    padding: "4px 8px",
+    fontFamily: "monospace",
+    outline: "none",
+    minWidth: 0,
   },
 };
 
