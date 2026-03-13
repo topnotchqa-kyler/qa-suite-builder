@@ -254,8 +254,6 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
         }}
         aria-expanded={expanded}
       >
-        <Badge extraStyle={priorityStyle}>{testCase.priority}</Badge>
-        <Badge extraStyle={CATEGORY_STYLE_BASE}>{testCase.category}</Badge>
         <span style={{ fontSize: 11, color: "#555", fontFamily: "monospace", flexShrink: 0 }}>
           {testCase.id}
         </span>
@@ -272,6 +270,8 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
             {testCase.title}
           </span>
         )}
+        <Badge extraStyle={priorityStyle}>{testCase.priority}</Badge>
+        <Badge extraStyle={CATEGORY_STYLE_BASE}>{testCase.category}</Badge>
         <span style={{ color: "#444", fontSize: 9, flexShrink: 0, marginLeft: 4 }}>
           {expanded ? "▲" : "▶"}
         </span>
