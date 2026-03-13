@@ -202,14 +202,14 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
   function handleTextareaKeyDown(e, field) {
     if (e.key === "Tab" && suggestion && suggestField === field) {
       e.preventDefault();
-      onTestCaseChange?.(sectionIdx, testCaseIdx, field, (testCase[field] || "") + " " + suggestion);
+      onTestCaseChange?.(sectionIdx, testCaseIdx, field, (testCase[field] || "").trimEnd() + " " + suggestion);
       setSuggestion(""); setSuggestField("");
     }
     if (e.key === "Escape" && suggestion) { setSuggestion(""); setSuggestField(""); }
   }
 
   function acceptSuggestion(field) {
-    onTestCaseChange?.(sectionIdx, testCaseIdx, field, (testCase[field] || "") + " " + suggestion);
+    onTestCaseChange?.(sectionIdx, testCaseIdx, field, (testCase[field] || "").trimEnd() + " " + suggestion);
     setSuggestion(""); setSuggestField("");
   }
 
