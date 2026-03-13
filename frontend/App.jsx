@@ -204,8 +204,18 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
 
   return (
     <div style={{ borderBottom: isLast ? "none" : "1px solid rgba(255,255,255,0.03)" }}>
-      <button
-        onClick={() => setExpanded(v => !v)}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={e => {
+          const tag = e.target.tagName;
+          if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(tag)) return;
+          setExpanded(v => !v);
+        }}
+        onKeyDown={e => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(v => !v); }
+        }}
         style={{
           width: "100%",
           display: "flex",
@@ -232,9 +242,6 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
             type="text"
             value={testCase.title || ""}
             onChange={e => onChange("title", e.target.value)}
-            onClick={e => e.stopPropagation()}
-            onKeyDown={e => e.stopPropagation()}
-            onKeyUp={e => e.stopPropagation()}
             style={styles.editInput}
             placeholder="Test case title"
           />
@@ -246,7 +253,7 @@ function TestCaseRow({ testCase, isLast, sectionIdx, testCaseIdx, editMode, onTe
         <span style={{ color: "#444", fontSize: 9, flexShrink: 0, marginLeft: 4 }}>
           {expanded ? "▲" : "▶"}
         </span>
-      </button>
+      </div>
 
       {expanded && (
         <div style={{
