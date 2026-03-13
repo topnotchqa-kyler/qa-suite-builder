@@ -937,6 +937,10 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/suites`, { headers: authHeaders });
       if (res.status === 401) { setDashboardError("Please sign in to view your dashboard."); return; }
       if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error("Unexpected response from server — is the backend running?");
+      }
       const data = await res.json();
       setDashboardSuites(data.suites || []);
     } catch (err) {
@@ -1024,54 +1028,50 @@ export default function App() {
       <div style={styles.bg} />
       <div style={styles.grain} />
 
-      {/* GitHub link */}
-      <a
-        href="https://github.com/topnotchqa-kyler/qa-suite-builder"
-        target="_blank"
-        rel="noopener noreferrer"
-        style={styles.githubLink}
-        className="sg-github"
-        aria-label="View source on GitHub"
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
-          <path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.014-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836a9.59 9.59 0 0 1 2.504.337c1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z" />
-        </svg>
-        <span>GitHub</span>
-      </a>
-
-      {/* Auth: user pill (signed in) */}
-      {supabase && user && (
-        <div style={styles.userPill} className="sg-auth-btn">
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>
-            {user.email}
-          </span>
-          <button
-            onClick={() => supabase.auth.signOut()}
-            style={{ background: "none", border: "none", color: "#7C5EA0", fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0, marginLeft: 4, whiteSpace: "nowrap" }}
-          >
-            Sign out
+      {/* Fixed header controls — single flex row so widths never overlap */}
+      <div style={styles.headerControls}>
+        {supabase && user && (
+          <button onClick={() => navigateTo("dashboard")} style={styles.mySuitesBtn}>
+            My Suites
           </button>
-        </div>
-      )}
+        )}
 
-      {/* Auth: sign-in button (signed out) */}
-      {supabase && !user && (
-        <button
-          className="sg-auth-btn"
-          onClick={() => { setShowAuthModal(true); setAuthMode("signin"); }}
-          style={styles.signInBtn}
-          aria-label="Sign in"
+        {supabase && user ? (
+          <div style={styles.userPill}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>
+              {user.email}
+            </span>
+            <button
+              onClick={() => supabase.auth.signOut()}
+              style={{ background: "none", border: "none", color: "#7C5EA0", fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0, marginLeft: 4, whiteSpace: "nowrap" }}
+            >
+              Sign out
+            </button>
+          </div>
+        ) : supabase && (
+          <button
+            onClick={() => { setShowAuthModal(true); setAuthMode("signin"); }}
+            style={styles.signInBtn}
+            aria-label="Sign in"
+          >
+            Sign in
+          </button>
+        )}
+
+        <a
+          href="https://github.com/topnotchqa-kyler/qa-suite-builder"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={styles.githubLink}
+          className="sg-github"
+          aria-label="View source on GitHub"
         >
-          Sign in
-        </button>
-      )}
-
-      {/* My Suites button (signed in) */}
-      {supabase && user && (
-        <button onClick={() => navigateTo("dashboard")} style={styles.mySuitesBtn} className="sg-auth-btn">
-          My Suites
-        </button>
-      )}
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+            <path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.014-1.703-2.782.604-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836a9.59 9.59 0 0 1 2.504.337c1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z" />
+          </svg>
+          <span>GitHub</span>
+        </a>
+      </div>
 
       {currentPage === "dashboard" ? (
         <Dashboard
@@ -1387,11 +1387,16 @@ const styles = {
     pointerEvents: "none",
     zIndex: 0,
   },
-  githubLink: {
+  headerControls: {
     position: "fixed",
     top: 16,
     right: 20,
     zIndex: 10,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
+  githubLink: {
     display: "flex",
     alignItems: "center",
     gap: 6,
@@ -1739,12 +1744,8 @@ const styles = {
     flexShrink: 0,
   },
 
-  // Header auth controls
+  // Header auth controls (position managed by headerControls flex container)
   userPill: {
-    position: "fixed",
-    top: 16,
-    right: 120,
-    zIndex: 10,
     display: "flex",
     alignItems: "center",
     gap: 8,
@@ -1754,12 +1755,9 @@ const styles = {
     borderRadius: 8,
     background: "rgba(124,58,237,0.1)",
     border: "1px solid rgba(192,132,252,0.2)",
+    whiteSpace: "nowrap",
   },
   signInBtn: {
-    position: "fixed",
-    top: 16,
-    right: 120,
-    zIndex: 10,
     display: "flex",
     alignItems: "center",
     gap: 6,
@@ -1772,6 +1770,7 @@ const styles = {
     cursor: "pointer",
     fontFamily: "inherit",
     transition: "color 0.15s, background 0.15s",
+    whiteSpace: "nowrap",
   },
 
   footer: {
@@ -1792,12 +1791,8 @@ const styles = {
     margin: "8px 0 0",
   },
 
-  // My Suites button
+  // My Suites button (position managed by headerControls flex container)
   mySuitesBtn: {
-    position: "fixed",
-    top: 16,
-    right: 240,
-    zIndex: 10,
     display: "flex",
     alignItems: "center",
     gap: 6,
@@ -1810,6 +1805,7 @@ const styles = {
     cursor: "pointer",
     fontFamily: "inherit",
     transition: "color 0.15s, background 0.15s",
+    whiteSpace: "nowrap",
   },
 
   // Edit mode buttons (viewer header)
@@ -1996,7 +1992,6 @@ styleEl.textContent = `
     .sg-gen-btn  { padding: 12px 24px !important; width: 100% !important; }
     .sg-github span { display: none !important; }
     .sg-github { padding: 6px 8px !important; gap: 0 !important; }
-    .sg-auth-btn { right: 72px !important; }
   }
 `;
 document.head.appendChild(styleEl);
