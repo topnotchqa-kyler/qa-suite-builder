@@ -27,7 +27,11 @@ from auth import get_optional_user_id, get_required_user_id
 from crawler import crawl_site
 from generation import generate_test_suite
 from xlsx_builder import build_workbook
-from storage import save_suite, get_suite, list_suites, snapshot_version, update_suite_test_suite
+from storage import (
+    save_suite, get_suite, list_suites,
+    snapshot_version, update_suite_test_suite,
+    list_suite_versions, get_suite_version,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -326,6 +330,55 @@ async def get_suite_endpoint(suite_id: str):
     if not suite:
         raise HTTPException(status_code=404, detail="Suite not found.")
     return JSONResponse(content=suite)
+
+
+@app.get("/api/suites/{suite_id}/versions")
+async def list_versions_endpoint(
+    suite_id: str,
+    user_id: str = Depends(get_required_user_id),
+):
+    """List version snapshots for a suite. Requires JWT + ownership."""
+    try:
+        suite = await asyncio.to_thread(get_suite, suite_id)
+    except Exception:
+        logger.exception("Get suite error during list_versions for id: %s", suite_id)
+        raise HTTPException(status_code=500, detail="Could not retrieve suite.")
+    if not suite:
+        raise HTTPException(status_code=404, detail="Suite not found.")
+    if suite.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized.")
+    try:
+        versions = await asyncio.to_thread(list_suite_versions, suite_id)
+        return JSONResponse(content={"versions": versions})
+    except Exception:
+        logger.exception("List versions error for suite: %s", suite_id)
+        raise HTTPException(status_code=500, detail="Could not retrieve version history.")
+
+
+@app.get("/api/suites/{suite_id}/versions/{version_number}")
+async def get_version_endpoint(
+    suite_id: str,
+    version_number: int,
+    user_id: str = Depends(get_required_user_id),
+):
+    """Fetch a single version snapshot. Requires JWT + ownership."""
+    try:
+        suite = await asyncio.to_thread(get_suite, suite_id)
+    except Exception:
+        logger.exception("Get suite error during get_version for id: %s", suite_id)
+        raise HTTPException(status_code=500, detail="Could not retrieve suite.")
+    if not suite:
+        raise HTTPException(status_code=404, detail="Suite not found.")
+    if suite.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized.")
+    try:
+        version = await asyncio.to_thread(get_suite_version, suite_id, version_number)
+    except Exception:
+        logger.exception("Get version error for suite: %s v%s", suite_id, version_number)
+        raise HTTPException(status_code=500, detail="Could not retrieve version.")
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found.")
+    return JSONResponse(content=version)
 
 
 @app.get("/api/suites/{suite_id}/xlsx")
