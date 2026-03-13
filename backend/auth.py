@@ -11,7 +11,7 @@ import os
 from typing import Optional
 
 import jwt
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 logger = logging.getLogger(__name__)
 
@@ -64,3 +64,25 @@ def get_optional_user_id(request: Request) -> Optional[str]:
     except jwt.InvalidTokenError as exc:
         logger.debug("JWT invalid (%s) — treating as anonymous", exc)
         return None
+
+
+def get_required_user_id(request: Request) -> str:
+    """
+    FastAPI dependency. Like get_optional_user_id but raises HTTP 401 when
+    no valid token is present. Use on endpoints that require authentication.
+
+    Usage in a route:
+        from auth import get_required_user_id
+        from fastapi import Depends
+
+        @app.patch("/api/suites/{suite_id}")
+        async def endpoint(
+            suite_id: str,
+            user_id: str = Depends(get_required_user_id),
+        ):
+            ...
+    """
+    user_id = get_optional_user_id(request)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    return user_id
