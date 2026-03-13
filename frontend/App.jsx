@@ -322,6 +322,7 @@ function SectionCard({ section, defaultExpanded, isLast, sectionIdx, editMode, o
 function TestSuiteViewer({
   testSuite, crawlData, onDownloadXlsx, isDownloading, suiteId, onCopyLink, linkCopied,
   canEdit, editMode, editedSuite, isSaving, saveError, onEnterEdit, onCancelEdit, onSaveEdit, onTestCaseChange,
+  snapshotInfo, onRestoreSnapshot, isRestoring,
 }) {
   const activeSuite = editMode ? editedSuite : testSuite;
   const totalTests = (activeSuite.sections || []).reduce((sum, s) => sum + (s.test_cases || []).length, 0);
@@ -374,8 +375,8 @@ function TestSuiteViewer({
               )}
             </>
           )}
-          {/* Download / copy link (hidden in edit mode) */}
-          {!editMode && (
+          {/* Download / copy link (hidden in edit mode and snapshot view) */}
+          {!editMode && !snapshotInfo && (
             <>
               <button
                 onClick={onDownloadXlsx}
@@ -421,11 +422,27 @@ function TestSuiteViewer({
         </div>
       </div>
 
+      {/* Snapshot banner — shown when viewing a historical version */}
+      {snapshotInfo && (
+        <div style={styles.snapshotBanner}>
+          <span>
+            ⏪ Viewing <strong>Version {snapshotInfo.versionNumber}</strong> of {snapshotInfo.siteName} — historical snapshot
+          </span>
+          <button
+            onClick={onRestoreSnapshot}
+            disabled={isRestoring}
+            style={{ ...styles.restoreBtn, opacity: isRestoring ? 0.6 : 1, cursor: isRestoring ? "not-allowed" : "pointer" }}
+          >
+            {isRestoring ? "Restoring…" : "Restore this version →"}
+          </button>
+        </div>
+      )}
+
       {/* Sections */}
       <div style={{
         border: "1px solid rgba(192,132,252,0.2)",
-        borderTop: "none",
-        borderRadius: "0 0 14px 14px",
+        borderTop: snapshotInfo ? "1px solid rgba(192,132,252,0.2)" : "none",
+        borderRadius: snapshotInfo ? 14 : "0 0 14px 14px",
         overflow: "hidden",
       }}>
         {(activeSuite.sections || []).map((section, i) => (
@@ -446,7 +463,12 @@ function TestSuiteViewer({
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
-function Dashboard({ suites, loading, error, onOpen, onNavigateHome }) {
+function Dashboard({
+  suites, loading, error, onOpen, onNavigateHome,
+  onToggleHistory, expandedVersionSuiteId,
+  versionHistoryData, versionHistoryLoading, versionHistoryError,
+  onViewVersion, onRestoreVersion, isRestoring,
+}) {
   return (
     <div style={styles.dashboardWrap}>
       <div style={styles.dashboardHeader}>
@@ -484,21 +506,72 @@ function Dashboard({ suites, loading, error, onOpen, onNavigateHome }) {
 
       {!loading && !error && suites && suites.length > 0 && (
         <div style={styles.dashboardTable}>
-          {suites.map((s, idx) => (
-            <div key={s.id} style={{ ...styles.dashboardRow, borderBottom: idx === suites.length - 1 ? "none" : "1px solid rgba(255,255,255,0.05)" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={styles.dashboardSiteName}>{s.site_name || "Untitled"}</div>
-                <div style={styles.dashboardMeta}>{s.base_url}</div>
+          {suites.map((s, idx) => {
+            const isExpanded = expandedVersionSuiteId === s.id;
+            return (
+              <div key={s.id} style={{ borderBottom: idx === suites.length - 1 ? "none" : "1px solid rgba(255,255,255,0.05)" }}>
+                {/* ── Suite row ── */}
+                <div style={styles.dashboardRow}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={styles.dashboardSiteName}>{s.site_name || "Untitled"}</div>
+                    <div style={styles.dashboardMeta}>{s.base_url}</div>
+                  </div>
+                  <div style={styles.dashboardDate}>
+                    {new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  </div>
+                  <button onClick={() => onOpen(s.id)} style={styles.dashboardActionBtn}>Open</button>
+                  <a href={`${API_BASE}/api/suites/${s.id}/xlsx`} download style={styles.dashboardDownloadLink}>
+                    ⬇ xlsx
+                  </a>
+                  <button
+                    onClick={() => onToggleHistory(s.id)}
+                    style={styles.dashboardHistoryBtn}
+                    aria-expanded={isExpanded}
+                  >
+                    {isExpanded ? "▲ History" : "▼ History"}
+                  </button>
+                </div>
+
+                {/* ── Version history panel ── */}
+                {isExpanded && (
+                  <div style={styles.dashboardVersionPanel}>
+                    {versionHistoryLoading && (
+                      <span style={{ fontSize: 11, color: "#888" }}>Loading…</span>
+                    )}
+                    {versionHistoryError && (
+                      <span style={{ fontSize: 11, color: "#FF8080" }}>{versionHistoryError}</span>
+                    )}
+                    {!versionHistoryLoading && !versionHistoryError && versionHistoryData.length === 0 && (
+                      <span style={{ fontSize: 11, color: "#666" }}>No saved versions yet — edit this suite to create history.</span>
+                    )}
+                    {!versionHistoryLoading && versionHistoryData.map(v => (
+                      <div key={v.version_number} style={styles.dashboardVersionRow}>
+                        <span style={styles.dashboardVersionBadge}>v{v.version_number}</span>
+                        <span style={styles.dashboardVersionDate}>
+                          {new Date(v.created_at).toLocaleString("en-US", {
+                            month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+                          })}
+                        </span>
+                        <button
+                          onClick={() => onViewVersion(s.id, v.version_number, s.site_name)}
+                          style={styles.dashboardVersionBtn}
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => onRestoreVersion(s.id, v.version_number)}
+                          disabled={isRestoring}
+                          style={styles.dashboardVersionBtn}
+                        >
+                          {isRestoring ? "…" : "Restore"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div style={styles.dashboardDate}>
-                {new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-              </div>
-              <button onClick={() => onOpen(s.id)} style={styles.dashboardActionBtn}>Open</button>
-              <a href={`${API_BASE}/api/suites/${s.id}/xlsx`} download style={styles.dashboardDownloadLink}>
-                ⬇ xlsx
-              </a>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -685,6 +758,14 @@ export default function App() {
   const [suiteOwnerId, setSuiteOwnerId] = useState(null);
   const [isSaving, setIsSaving]       = useState(false);
   const [saveError, setSaveError]     = useState("");
+
+  // ── Version history state ────────────────────────────────────────────────────
+  const [expandedVersionSuiteId, setExpandedVersionSuiteId] = useState(null);
+  const [versionHistoryData, setVersionHistoryData]         = useState([]);
+  const [versionHistoryLoading, setVersionHistoryLoading]   = useState(false);
+  const [versionHistoryError, setVersionHistoryError]       = useState("");
+  const [viewingSnapshot, setViewingSnapshot]               = useState(null); // {suiteId, versionNumber, siteName}
+  const [isRestoring, setIsRestoring]                       = useState(false);
 
   // ── Supabase auth listener (runs before suite loader — order matters) ────────
   useEffect(() => {
@@ -910,6 +991,8 @@ export default function App() {
     setEditedSuite(null);
     setSuiteOwnerId(null);
     setSaveError("");
+    setViewingSnapshot(null);
+    setIsRestoring(false);
     window.history.replaceState({}, "", "/");
   }
 
@@ -972,6 +1055,110 @@ export default function App() {
     } catch {
       setError("Could not load the suite.");
       setPhase("error");
+    }
+  }
+
+  // ── Version history handlers ─────────────────────────────────────────────────
+
+  async function loadVersionHistory(suiteId) {
+    setVersionHistoryLoading(true);
+    setVersionHistoryError("");
+    setVersionHistoryData([]);
+    try {
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`${API_BASE}/api/suites/${suiteId}/versions`, { headers: authHeaders });
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      const data = await res.json();
+      setVersionHistoryData(data.versions || []);
+    } catch (err) {
+      setVersionHistoryError(err.message || "Could not load history.");
+    } finally {
+      setVersionHistoryLoading(false);
+    }
+  }
+
+  function handleToggleHistory(suiteId) {
+    if (expandedVersionSuiteId === suiteId) {
+      setExpandedVersionSuiteId(null);
+    } else {
+      setExpandedVersionSuiteId(suiteId);
+      loadVersionHistory(suiteId);
+    }
+  }
+
+  async function handleViewVersion(suiteId, versionNumber, siteName) {
+    navigateTo("home");
+    setPhase("generating");
+    try {
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(
+        `${API_BASE}/api/suites/${suiteId}/versions/${versionNumber}`,
+        { headers: authHeaders }
+      );
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setTestSuiteData(data.test_suite);
+      setCrawlData(null);
+      setSubmittedUrl("");
+      setSuiteId(null);        // prevents share link / xlsx download
+      setSuiteOwnerId(null);   // canEdit = false
+      setViewingSnapshot({ suiteId, versionNumber, siteName });
+      setPhase("done");
+    } catch {
+      setError("Could not load version snapshot.");
+      setPhase("error");
+    }
+  }
+
+  async function handleRestoreFromViewer() {
+    if (!viewingSnapshot || !testSuiteData) return;
+    const snap = viewingSnapshot;
+    setIsRestoring(true);
+    setSaveError("");
+    try {
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`${API_BASE}/api/suites/${snap.suiteId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({ test_suite: testSuiteData }),
+      });
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      // Reload the live suite (now contains the restored content)
+      setViewingSnapshot(null);
+      await handleOpenSuite(snap.suiteId);
+    } catch (err) {
+      setSaveError(err.message || "Restore failed. Please try again.");
+    } finally {
+      setIsRestoring(false);
+    }
+  }
+
+  async function handleRestoreVersion(suiteId, versionNumber) {
+    setIsRestoring(true);
+    setVersionHistoryError("");
+    try {
+      const authHeaders = await getAuthHeaders();
+      // Fetch the snapshot content
+      const vRes = await fetch(
+        `${API_BASE}/api/suites/${suiteId}/versions/${versionNumber}`,
+        { headers: authHeaders }
+      );
+      if (!vRes.ok) throw new Error(`Error ${vRes.status}`);
+      const vData = await vRes.json();
+      // PATCH the live suite with the snapshot content
+      const pRes = await fetch(`${API_BASE}/api/suites/${suiteId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({ test_suite: vData.test_suite }),
+      });
+      if (!pRes.ok) throw new Error(`Error ${pRes.status}`);
+      // Collapse panel and reload dashboard
+      setExpandedVersionSuiteId(null);
+      await loadDashboard();
+    } catch (err) {
+      setVersionHistoryError(err.message || "Restore failed.");
+    } finally {
+      setIsRestoring(false);
     }
   }
 
@@ -1080,6 +1267,14 @@ export default function App() {
           error={dashboardError}
           onOpen={handleOpenSuite}
           onNavigateHome={() => navigateTo("home")}
+          onToggleHistory={handleToggleHistory}
+          expandedVersionSuiteId={expandedVersionSuiteId}
+          versionHistoryData={versionHistoryData}
+          versionHistoryLoading={versionHistoryLoading}
+          versionHistoryError={versionHistoryError}
+          onViewVersion={handleViewVersion}
+          onRestoreVersion={handleRestoreVersion}
+          isRestoring={isRestoring}
         />
       ) : (
 
@@ -1319,6 +1514,9 @@ export default function App() {
             onCancelEdit={handleCancelEdit}
             onSaveEdit={handleSaveEdit}
             onTestCaseChange={handleTestCaseChange}
+            snapshotInfo={viewingSnapshot}
+            onRestoreSnapshot={handleRestoreFromViewer}
+            isRestoring={isRestoring}
           />
         )}
 
@@ -1973,6 +2171,78 @@ const styles = {
     flexShrink: 0,
     textDecoration: "none",
     whiteSpace: "nowrap",
+  },
+  dashboardHistoryBtn: {
+    background: "none",
+    border: "1px solid rgba(255,255,255,0.08)",
+    color: "#666",
+    borderRadius: 7,
+    padding: "6px 10px",
+    fontSize: 11,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+  },
+  dashboardVersionPanel: {
+    padding: "12px 20px 14px",
+    background: "rgba(0,0,0,0.2)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  dashboardVersionRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  },
+  dashboardVersionBadge: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#C084FC",
+    fontVariantNumeric: "tabular-nums",
+    minWidth: 28,
+  },
+  dashboardVersionDate: {
+    fontSize: 11,
+    color: "#666",
+    flex: 1,
+  },
+  dashboardVersionBtn: {
+    background: "none",
+    border: "1px solid rgba(255,255,255,0.1)",
+    color: "#999",
+    borderRadius: 6,
+    padding: "4px 10px",
+    fontSize: 11,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  snapshotBanner: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    background: "rgba(124,58,237,0.12)",
+    border: "1px solid rgba(192,132,252,0.2)",
+    borderRadius: 8,
+    padding: "10px 16px",
+    marginBottom: 12,
+    fontSize: 12,
+    color: "#C084FC",
+  },
+  restoreBtn: {
+    background: "rgba(124,58,237,0.25)",
+    border: "1px solid rgba(192,132,252,0.4)",
+    color: "#C084FC",
+    borderRadius: 7,
+    padding: "6px 14px",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
   },
 };
 

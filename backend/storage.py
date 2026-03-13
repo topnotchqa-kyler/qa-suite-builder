@@ -126,3 +126,36 @@ def update_suite_test_suite(suite_id: str, test_suite: dict) -> None:
     )
     if not result.data:
         raise ValueError(f"Suite {suite_id} not found or update returned no rows.")
+
+
+def list_suite_versions(suite_id: str, limit: int = 20) -> list:
+    """
+    Return [{id, version_number, created_at}] for a suite, newest first.
+    Does NOT return the test_suite JSONB blob — keeps the list response lightweight.
+    """
+    client = _get_client()
+    result = (
+        client.table("test_suite_versions")
+        .select("id, version_number, created_at")
+        .eq("suite_id", suite_id)
+        .order("version_number", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return result.data
+
+
+def get_suite_version(suite_id: str, version_number: int) -> Optional[dict]:
+    """
+    Return {version_number, test_suite, created_at} for a single snapshot, or None.
+    """
+    client = _get_client()
+    result = (
+        client.table("test_suite_versions")
+        .select("version_number, test_suite, created_at")
+        .eq("suite_id", suite_id)
+        .eq("version_number", version_number)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0] if result.data else None

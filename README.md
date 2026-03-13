@@ -244,13 +244,14 @@ qa-suite-builder/
 │   ├── Dockerfile           # Backend-only Dockerfile
 │   ├── requirements.txt
 │   ├── requirements-dev.txt # Test dependencies (pytest — not installed in Railway)
-│   ├── tests/               # pytest unit tests (78 tests)
+│   ├── tests/               # pytest unit tests (85 tests)
 │   │   ├── conftest.py
 │   │   ├── test_auth.py
 │   │   ├── test_crawler_utils.py
 │   │   ├── test_generation_utils.py
 │   │   ├── test_main_utils.py
-│   │   └── test_patch_endpoint.py   # PATCH /api/suites/{id} security tests
+│   │   ├── test_patch_endpoint.py      # PATCH /api/suites/{id} security tests
+│   │   └── test_version_history.py     # GET /api/suites/{id}/versions security tests
 │   └── .env.example
 └── frontend/
     ├── App.jsx              # Main React component (all UI + inline styles)
@@ -278,6 +279,8 @@ qa-suite-builder/
 | `GET`    | `/api/suites/{id}` | — | — | Fetch a saved suite by UUID — returns `crawl_data` + `test_suite` |
 | `GET`    | `/api/suites/{id}/xlsx` | — | — | Build and download `.xlsx` for a saved suite — no AI call |
 | `PATCH`  | `/api/suites/{id}` | **required** | — | Edit a suite's `test_suite` JSON — snapshots old version first, enforces ownership |
+| `GET`    | `/api/suites/{id}/versions` | **required** | — | List version snapshots for a suite (metadata only — no test_suite blob) |
+| `GET`    | `/api/suites/{id}/versions/{n}` | **required** | — | Fetch one version snapshot by version number (includes `test_suite` JSONB) |
 
 ### Request body (`/api/crawl`, `/api/generate`)
 
