@@ -670,13 +670,56 @@ function SectionNav({ sections, selectedIdx, onSelect, search, onSearch }) {
   );
 }
 
+const PRIORITY_ORDER = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+const SORT_COLS = [["id", "TC ID"], ["alpha", "A–Z"], ["priority", "Priority"], ["category", "Category"]];
+
 function SectionPanel({ section, sectionIdx, editMode, onTestCaseChange, apiKey }) {
+  const [sortBy, setSortBy]               = useState("id");
+  const [sortDir, setSortDir]             = useState("asc");
+  const [filterPriority, setFilterPriority] = useState("");
+  const [filterCategory, setFilterCategory] = useState("");
+
   if (!section) {
     return <div style={styles.panelEmpty}>← Select a section from the left panel</div>;
   }
+
   const tests = section.test_cases || [];
+
+  // Filter
+  const filtered = tests.filter(tc => {
+    if (filterPriority && tc.priority !== filterPriority) return false;
+    if (filterCategory && !tc.category?.toLowerCase().includes(filterCategory.toLowerCase())) return false;
+    return true;
+  });
+
+  // Sort (preserve original index for edit-mode writes)
+  const sorted = filtered
+    .map((tc, _) => ({ tc, origIdx: tests.indexOf(tc) }))
+    .sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === "id") {
+        const n = s => parseInt((s.tc.id || "").replace(/\D/g, "") || "0");
+        cmp = n(a) - n(b);
+      } else if (sortBy === "alpha") {
+        cmp = (a.tc.title || "").localeCompare(b.tc.title || "");
+      } else if (sortBy === "priority") {
+        cmp = (PRIORITY_ORDER[a.tc.priority] ?? 99) - (PRIORITY_ORDER[b.tc.priority] ?? 99);
+      } else if (sortBy === "category") {
+        cmp = (a.tc.category || "").localeCompare(b.tc.category || "");
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+
+  function handleSortClick(col) {
+    if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortBy(col); setSortDir("asc"); }
+  }
+
+  const hasFilters = filterPriority || filterCategory;
+
   return (
     <div style={styles.sectionPanel}>
+      {/* Panel header */}
       <div style={styles.panelHeader}>
         <div style={{ minWidth: 0 }}>
           <div style={styles.panelSectionName}>{section.name}</div>
@@ -684,21 +727,62 @@ function SectionPanel({ section, sectionIdx, editMode, onTestCaseChange, apiKey 
         </div>
         <span style={styles.panelTestCount}>{tests.length} test{tests.length !== 1 ? "s" : ""}</span>
       </div>
+
+      {/* Sort + filter controls */}
+      <div style={styles.panelControls}>
+        <div style={styles.panelSortRow}>
+          {SORT_COLS.map(([col, label]) => (
+            <button
+              key={col}
+              onClick={() => handleSortClick(col)}
+              style={{ ...styles.sortBtn, ...(sortBy === col ? styles.sortBtnActive : {}) }}
+            >
+              {label}
+              {sortBy === col && <span style={{ marginLeft: 3, fontSize: 9, opacity: 0.8 }}>{sortDir === "asc" ? "↑" : "↓"}</span>}
+            </button>
+          ))}
+        </div>
+        <div style={styles.panelFilterRow}>
+          <select
+            value={filterPriority}
+            onChange={e => setFilterPriority(e.target.value)}
+            style={styles.filterSelect}
+          >
+            <option value="">All priorities</option>
+            {["Critical", "High", "Medium", "Low"].map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <input
+            placeholder="Filter category…"
+            value={filterCategory}
+            onChange={e => setFilterCategory(e.target.value)}
+            style={styles.filterInput}
+          />
+          {hasFilters && (
+            <button
+              onClick={() => { setFilterPriority(""); setFilterCategory(""); }}
+              style={styles.clearFiltersBtn}
+              title="Clear filters"
+            >✕</button>
+          )}
+        </div>
+      </div>
+
+      {/* Test case list */}
       <div style={styles.panelCases}>
-        {tests.map((tc, i) => (
+        {sorted.map(({ tc, origIdx }, i) => (
           <TestCaseRow
-            key={tc.id || i}
+            key={tc.id || origIdx}
             testCase={tc}
-            isLast={i === tests.length - 1}
+            isLast={i === sorted.length - 1}
             sectionIdx={sectionIdx}
-            testCaseIdx={i}
+            testCaseIdx={origIdx}
             editMode={editMode}
             onTestCaseChange={onTestCaseChange}
             apiKey={apiKey}
           />
         ))}
-        {tests.length === 0 && (
-          <div style={styles.panelEmpty}>No test cases in this section.</div>
+        {sorted.length === 0 && (
+          <div style={styles.panelEmpty}>No test cases match the current filters.</div>
         )}
       </div>
     </div>
@@ -900,6 +984,7 @@ function SuiteExplorer({
           onSearch={setSearch}
         />
         <SectionPanel
+          key={selectedSection?.source_url || selectedIdx}
           section={selectedSection}
           sectionIdx={selectedIdx}
           editMode={editMode}
@@ -2754,6 +2839,76 @@ const styles = {
     padding: "2px 9px",
     flexShrink: 0,
     whiteSpace: "nowrap",
+  },
+  panelControls: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    padding: "6px 12px 6px 20px",
+    borderBottom: "1px solid rgba(255,255,255,0.04)",
+    flexShrink: 0,
+    flexWrap: "wrap",
+  },
+  panelSortRow: {
+    display: "flex",
+    gap: 4,
+    alignItems: "center",
+  },
+  sortBtn: {
+    background: "none",
+    border: "1px solid rgba(255,255,255,0.07)",
+    borderRadius: 6,
+    color: "#666",
+    fontSize: 11,
+    padding: "3px 8px",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    display: "flex",
+    alignItems: "center",
+    transition: "border-color 0.12s, color 0.12s",
+  },
+  sortBtnActive: {
+    border: "1px solid rgba(192,132,252,0.35)",
+    color: "#C084FC",
+    background: "rgba(124,58,237,0.08)",
+  },
+  panelFilterRow: {
+    display: "flex",
+    gap: 6,
+    alignItems: "center",
+  },
+  filterSelect: {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 6,
+    color: "#999",
+    fontSize: 11,
+    padding: "3px 6px",
+    fontFamily: "inherit",
+    outline: "none",
+    cursor: "pointer",
+  },
+  filterInput: {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 6,
+    color: "#D0C0F0",
+    fontSize: 11,
+    padding: "3px 8px",
+    fontFamily: "inherit",
+    outline: "none",
+    width: 120,
+  },
+  clearFiltersBtn: {
+    background: "none",
+    border: "none",
+    color: "#555",
+    fontSize: 11,
+    cursor: "pointer",
+    padding: "2px 4px",
+    fontFamily: "inherit",
+    lineHeight: 1,
   },
   panelCases: {
     flex: 1,
