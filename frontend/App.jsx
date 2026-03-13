@@ -1557,8 +1557,8 @@ export default function App() {
       setCurrentPage("dashboard");
       if (phase !== "idle") handleReset();
     } else {
-      window.history.pushState({}, "", "/");
       setCurrentPage("home");
+      if (phase !== "idle") handleReset();
     }
   }
 
